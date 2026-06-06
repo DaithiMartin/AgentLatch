@@ -9,7 +9,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
 
 ---
 
-### T0 — Scaffolding & tooling  `[~]` — [PR #1](https://github.com/DaithiMartin/AgentLatch/pull/1)
+### T0 — Scaffolding & tooling  `[x]` — [PR #1](https://github.com/DaithiMartin/AgentLatch/pull/1) (merged)
 - **Depends on:** —
 - **Do:** `pyproject.toml` (uv + hatchling, `requires-python >=3.11`, deps `redis>=5.0`
   + `pydantic>=2.6`, `[fastapi]` extra, dev group), `LICENSE` (MIT 2026 Daithi Martin),
@@ -20,7 +20,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   `ruff` + `pytest` run clean (0 tests OK); `LICENSE` is valid MIT (2026, Daithi Martin).
 - **Verify:** `uv sync --extra fastapi && uv run python -c "import agentlatch" && uv run ruff check . && uv run pytest`
 
-### T1 — `schemas.py` · `ResponsePayload`  `[ ]`
+### T1 — `schemas.py` · `ResponsePayload`  `[~]` — [PR #2](https://github.com/DaithiMartin/AgentLatch/pull/2)
 - **Depends on:** T0
 - **Do:** Pydantic v2 model, `extra="forbid"`; `session_id` + `text_to_speak`
   (non-empty, whitespace-stripped); `silent_context_update: dict[str, Any] | None`.

@@ -8,8 +8,8 @@ Durable state for resuming work. Pointers, not duplicates:
 
 ## Current position
 
-Slice 1 (Receiver + Holding Tank). **T0 in review** —
-[PR #1](https://github.com/DaithiMartin/AgentLatch/pull/1), awaiting merge.
+Slice 1 (Receiver + Holding Tank). T0 merged; **T1 in review** —
+[PR #2](https://github.com/DaithiMartin/AgentLatch/pull/2).
 Per-task status in `tasks/todo.md`.
 
 ## What exists
@@ -18,6 +18,8 @@ Per-task status in `tasks/todo.md`.
 - Package skeleton `agentlatch` (uv + hatchling, `src/` layout), MIT-licensed,
   dev tooling (pytest / ruff / mypy), smoke test, CI matrix (3.11/3.12), and a
   Conventional-Commits `commit-msg` hook.
+- `ResponsePayload` payload contract (`agentlatch.schemas`, pydantic v2,
+  `extra="forbid"`, non-empty whitespace-stripped strings).
 
 ## Infra / repo facts
 
