@@ -24,6 +24,8 @@ if ! printf '%s' "$subject" | grep -qE "$pattern"; then
     exit 1
 fi
 
+# Length is measured in bytes (wc -c), so a multibyte subject is bounded
+# slightly stricter than 72 characters -- acceptable for ASCII subjects.
 len=$(printf '%s' "$subject" | wc -c | tr -d ' ')
 if [ "$len" -gt 72 ]; then
     echo "commit-msg: subject is ${len} chars; hard cap is 72." >&2
