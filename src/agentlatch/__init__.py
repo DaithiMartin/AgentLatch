@@ -2,11 +2,11 @@
 
 Holds a background agent's message in Redis until voice-activity-detection
 reports the user has paused, then releases it into the live voice session.
-
-Public exports (``AgentLatch``, ``ResponsePayload``, ``ContextInjector``) are
-added as their modules land; see ``tasks/todo.md`` for progress.
 """
+
+from agentlatch.core import AgentLatch
+from agentlatch.schemas import ResponsePayload
 
 __version__ = "0.1.0"
 
-__all__ = ["__version__"]
+__all__ = ["AgentLatch", "ResponsePayload", "__version__"]
