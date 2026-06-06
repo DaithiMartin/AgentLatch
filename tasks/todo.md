@@ -29,7 +29,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   empty/whitespace string, wrong type, and unknown extra key; JSON round-trip is lossless.
 - **Verify:** `uv run pytest tests/test_schemas.py`
 
-### T2 — `queue.py` · HoldingTank  `[~]` — [PR #3](https://github.com/DaithiMartin/AgentLatch/pull/3)
+### T2 — `queue.py` · HoldingTank  `[x]` — [PR #3](https://github.com/DaithiMartin/AgentLatch/pull/3) (merged)
 - **Depends on:** T1
 - **Do:** `HoldingTank(redis, session_ttl)` with `push` (RPUSH+EXPIRE pipeline),
   `pop` (LPOP→`ResponsePayload`|None), `length` (LLEN); key `agentlatch:queue:{session_id}`.
@@ -38,7 +38,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   (`0 < TTL ≤ session_ttl`); `length` correct; `silent_context_update` survives round-trip.
 - **Verify:** `uv run pytest tests/test_queue.py`
 
-### T3 — `core.py` · `AgentLatch` facade  `[ ]`
+### T3 — `core.py` · `AgentLatch` facade  `[~]` — [PR #4](https://github.com/DaithiMartin/AgentLatch/pull/4)
 - **Depends on:** T2
 - **Do:** `AgentLatch(*, redis_url|redis_client, silence_threshold=2.0, session_ttl=3600,
   context_injector=None)` (exactly-one client source; positive numerics); `enqueue(payload)`
