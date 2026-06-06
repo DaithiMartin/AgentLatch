@@ -38,7 +38,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   (`0 < TTL ≤ session_ttl`); `length` correct; `silent_context_update` survives round-trip.
 - **Verify:** `uv run pytest tests/test_queue.py`
 
-### T3 — `core.py` · `AgentLatch` facade  `[~]` — [PR #4](https://github.com/DaithiMartin/AgentLatch/pull/4)
+### T3 — `core.py` · `AgentLatch` facade  `[x]` — [PR #4](https://github.com/DaithiMartin/AgentLatch/pull/4) (merged)
 - **Depends on:** T2
 - **Do:** `AgentLatch(*, redis_url|redis_client, silence_threshold=2.0, session_ttl=3600)`
   (exactly-one client source; positive numerics); `enqueue(payload)` → tank.push
@@ -49,13 +49,13 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   package exports resolve.
 - **Verify:** `uv run pytest tests/test_core.py`
 
-### CP-A — library ingest path (human gate)  `[ ]`
+### CP-A — library ingest path (human gate)  `[x]` — approved (ingest API frozen)
 - **Depends on:** T3 merged
 - **Evidence to present:** `uv run ruff check . && uv run mypy src && uv run pytest` all green;
   public API shape (`AgentLatch`, `ResponsePayload`) reads well before it's frozen behind HTTP.
 - **Approval:** await explicit user OK, then mark `[x]`.
 
-### T4 — `integrations/fastapi.py` · receiver  `[ ]`
+### T4 — `integrations/fastapi.py` · receiver  `[~]` — [PR #5](https://github.com/DaithiMartin/AgentLatch/pull/5)
 - **Depends on:** T3 merged, CP-A approved
 - **Do:** `create_router(latch)` → `POST /api/v1/queue_response` (body `ResponsePayload`),
   202 on valid; import-guarded with a friendly `pip install agentlatch[fastapi]` error.
