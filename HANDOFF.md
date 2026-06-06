@@ -8,8 +8,8 @@ Durable state for resuming work. Pointers, not duplicates:
 
 ## Current position
 
-Slice 1 (Receiver + Holding Tank). T0 merged; **T1 in review** —
-[PR #2](https://github.com/DaithiMartin/AgentLatch/pull/2).
+Slice 1 (Receiver + Holding Tank). T0–T1 merged; **T2 in review** —
+[PR #3](https://github.com/DaithiMartin/AgentLatch/pull/3).
 Per-task status in `tasks/todo.md`.
 
 ## What exists
@@ -20,6 +20,8 @@ Per-task status in `tasks/todo.md`.
   Conventional-Commits `commit-msg` hook.
 - `ResponsePayload` payload contract (`agentlatch.schemas`, pydantic v2,
   `extra="forbid"`, non-empty whitespace-stripped strings).
+- `HoldingTank` per-session Redis FIFO queue (`agentlatch.queue`:
+  `push`/`pop`/`length`, RPUSH/LPOP, TTL refreshed on write).
 
 ## Infra / repo facts
 
