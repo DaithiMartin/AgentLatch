@@ -144,5 +144,5 @@ irreversible/outward action beyond the expected PR.**
 No open decisions remain for Slice 1.
 
 ## 6. Next step
-After T0 merges, run `dev-loop` on **T1** (`schemas.py`). Live status in
+Build proceeds task-by-task via `dev-loop`; live status and the next task are in
 [`todo.md`](./todo.md).
