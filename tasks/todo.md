@@ -20,7 +20,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   `ruff` + `pytest` run clean (0 tests OK); `LICENSE` is valid MIT (2026, Daithi Martin).
 - **Verify:** `uv sync --extra fastapi && uv run python -c "import agentlatch" && uv run ruff check . && uv run pytest`
 
-### T1 — `schemas.py` · `ResponsePayload`  `[~]` — [PR #2](https://github.com/DaithiMartin/AgentLatch/pull/2)
+### T1 — `schemas.py` · `ResponsePayload`  `[x]` — [PR #2](https://github.com/DaithiMartin/AgentLatch/pull/2) (merged)
 - **Depends on:** T0
 - **Do:** Pydantic v2 model, `extra="forbid"`; `session_id` + `text_to_speak`
   (non-empty, whitespace-stripped); `silent_context_update: dict[str, Any] | None`.
@@ -29,7 +29,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   empty/whitespace string, wrong type, and unknown extra key; JSON round-trip is lossless.
 - **Verify:** `uv run pytest tests/test_schemas.py`
 
-### T2 — `queue.py` · HoldingTank  `[ ]`
+### T2 — `queue.py` · HoldingTank  `[~]` — [PR #3](https://github.com/DaithiMartin/AgentLatch/pull/3)
 - **Depends on:** T1
 - **Do:** `HoldingTank(redis, session_ttl)` with `push` (RPUSH+EXPIRE pipeline),
   `pop` (LPOP→`ResponsePayload`|None), `length` (LLEN); key `agentlatch:queue:{session_id}`.
