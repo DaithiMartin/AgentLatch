@@ -125,6 +125,9 @@ Redis-server-time as the canonical clock is noted as a future hardening.)
 ## 4. Public API (the "commands" surface)
 
 This is a Hyrum's-Law surface — treat every signature below as a stable contract.
+It describes the complete intended surface; each method/parameter lands in the
+slice that builds it (e.g. `get_next_message` in Slice 2; `context_injector` /
+`ContextInjector` in Slice 3) — see [`tasks/todo.md`](./tasks/todo.md).
 
 ```python
 from agentlatch import AgentLatch, ResponsePayload, ContextInjector

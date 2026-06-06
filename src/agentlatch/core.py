@@ -1,9 +1,8 @@
 """The AgentLatch facade — the public entry point that wires the ingest path.
 
 Constructs (or adopts) a Redis client, owns a HoldingTank, and exposes
-``enqueue`` for the Receiver. ``silence_threshold`` and ``context_injector`` are
-accepted now for a stable signature and consumed by the Delivery Engine /
-Context Injector in later slices.
+``enqueue`` for the Receiver. ``silence_threshold`` is accepted now for a stable
+signature and consumed by the Delivery Engine in a later slice.
 """
 
 from redis.asyncio import Redis
@@ -27,7 +26,6 @@ class AgentLatch:
         redis_client: Redis | None = None,
         silence_threshold: float = 2.0,
         session_ttl: int = 3600,
-        context_injector: object | None = None,
     ) -> None:
         if (redis_url is None) == (redis_client is None):
             raise ValueError("provide exactly one of redis_url or redis_client")
@@ -47,8 +45,6 @@ class AgentLatch:
         self._tank = HoldingTank(self._redis, session_ttl)
         self.silence_threshold = silence_threshold
         self.session_ttl = session_ttl
-        # Inert until Slice 3's ContextInjector; stored now for signature stability.
-        self._context_injector = context_injector
 
     async def enqueue(self, payload: ResponsePayload) -> None:
         """Persist a payload to its session's holding queue."""
