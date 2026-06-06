@@ -9,13 +9,13 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
 
 ---
 
-### T0 — Scaffolding & tooling  `[ ]`
+### T0 — Scaffolding & tooling  `[~]` — [PR #1](https://github.com/DaithiMartin/AgentLatch/pull/1)
 - **Depends on:** —
 - **Do:** `pyproject.toml` (uv + hatchling, `requires-python >=3.11`, deps `redis>=5.0`
   + `pydantic>=2.6`, `[fastapi]` extra, dev group), `LICENSE` (MIT 2026 Daithi Martin),
   `README.md` stub, `.gitignore`, `src/agentlatch/__init__.py`,
-  `src/agentlatch/integrations/__init__.py`, `tests/__init__.py`, seed `HANDOFF.md`.
-  *(Pending decision: `.githooks/commit-msg` + `core.hooksPath`.)*
+  `src/agentlatch/integrations/__init__.py`, `tests/__init__.py`, seed `HANDOFF.md`;
+  `.githooks/commit-msg` + `core.hooksPath`; CI matrix (`.github/workflows/ci.yml`, 3.11/3.12).
 - **Acceptance:** `uv sync --extra fastapi` resolves; `import agentlatch` works;
   `ruff` + `pytest` run clean (0 tests OK); `LICENSE` is valid MIT (2026, Daithi Martin).
 - **Verify:** `uv sync --extra fastapi && uv run python -c "import agentlatch" && uv run ruff check . && uv run pytest`
@@ -74,8 +74,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
 ---
 
 ## Open decisions
-- [ ] **`commit-msg` hook:** add tracked `.githooks/commit-msg` + `core.hooksPath .githooks`
-  in T0, or rely on the `commit-message` skill to write compliant messages without a hook?
+- [x] **`commit-msg` hook:** added tracked `.githooks/commit-msg` + `core.hooksPath .githooks` (option A).
 - [x] `extra="forbid"` on `ResponsePayload` — **yes** (strict).
 - [x] `enqueue` accepts `ResponsePayload` only (no `dict` overload) — **yes**.
 - [x] MIT holder = **Daithi Martin**.

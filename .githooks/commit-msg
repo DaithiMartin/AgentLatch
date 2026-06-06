@@ -1,0 +1,38 @@
+#!/bin/sh
+# commit-msg hook — enforce Conventional Commits (50/72 style).
+# Enable once per clone:  git config core.hooksPath .githooks
+# Bypass in a pinch:      git commit --no-verify
+
+msg_file="$1"
+
+# Subject = first line that is neither a comment nor blank.
+subject=$(grep -vE '^[[:space:]]*#' "$msg_file" | grep -vE '^[[:space:]]*$' | head -n 1)
+
+# Let git's own machinery (merge/revert/fixup/squash) through untouched.
+case "$subject" in
+    "Merge "*|"Revert "*|"fixup! "*|"squash! "*) exit 0 ;;
+esac
+
+types='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
+pattern="^(${types})(\([a-z0-9._/-]+\))?!?: .+"
+
+if ! printf '%s' "$subject" | grep -qE "$pattern"; then
+    echo "commit-msg: subject must be a Conventional Commit." >&2
+    echo "  format: <type>(<scope>): <description>" >&2
+    echo "  types:  ${types}" >&2
+    echo "  got:    ${subject}" >&2
+    exit 1
+fi
+
+# Length is measured in bytes (wc -c), so a multibyte subject is bounded
+# slightly stricter than 72 characters -- acceptable for ASCII subjects.
+len=$(printf '%s' "$subject" | wc -c | tr -d ' ')
+if [ "$len" -gt 72 ]; then
+    echo "commit-msg: subject is ${len} chars; hard cap is 72." >&2
+    exit 1
+fi
+if [ "$len" -gt 50 ]; then
+    echo "commit-msg: warning — subject is ${len} chars (target <=50, cap 72)." >&2
+fi
+
+exit 0

@@ -3,8 +3,7 @@
 > Stateful queueing middleware that holds a background agent's message until the
 > human stops talking, then releases it into a live voice session.
 
-**Status:** Draft v1 (spec-driven). No code written yet.
-**Last updated:** 2026-06-06
+**Status:** active — spec-driven; build progress in [`tasks/todo.md`](./tasks/todo.md).
 
 ---
 

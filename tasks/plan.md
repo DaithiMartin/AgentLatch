@@ -4,7 +4,7 @@
 > steps live in [`todo.md`](./todo.md) (the dev-loop tracker). This file owns the
 > **architecture, dependency graph, design notes, and workflow conventions**.
 
-**Created:** 2026-06-06 · **Status:** awaiting human review
+**Created:** 2026-06-06 · **Status:** approved; build progress in [`todo.md`](./todo.md)
 
 ---
 
@@ -71,6 +71,8 @@ These are the design decisions behind them.
   httpx ruff mypy`; `[tool.pytest.ini_options] asyncio_mode = "auto"`;
   `[tool.hatch.build.targets.wheel] packages = ["src/agentlatch"]`; ruff + mypy config.
 - `HANDOFF.md`: seed the durable-state doc the dev-loop reads/writes each run.
+- `.githooks/commit-msg` + `core.hooksPath`: enforce Conventional Commits (50/72).
+- `.github/workflows/ci.yml`: ruff + mypy + pytest on a 3.11/3.12 matrix.
 
 ### T1 — `ResponsePayload` (`schemas.py`)
 - Pydantic v2, `model_config = ConfigDict(extra="forbid")` (free-form data belongs
@@ -136,10 +138,11 @@ irreversible/outward action beyond the expected PR.**
 **Resolved:** `extra="forbid"` on `ResponsePayload` (strict) · `enqueue` accepts
 `ResponsePayload` only · MIT holder = Daithi Martin · uv + hatchling, Py 3.11+ · MIT.
 
-**Open (see [`todo.md`](./todo.md)):** whether T0 installs a tracked
-`.githooks/commit-msg` + `core.hooksPath`, or we rely on the `commit-message`
-skill to write compliant messages without an enforcing hook.
+**Resolved at T0:** install a tracked `.githooks/commit-msg` + `core.hooksPath`
+(enforce the convention for every contributor) and add a CI matrix (3.11/3.12).
+
+No open decisions remain for Slice 1.
 
 ## 6. Next step
-Resolve the `commit-msg` hook question, then run `dev-loop` on **T0** (it presents
-the T0 gate and waits for go-ahead before writing code).
+After T0 merges, run `dev-loop` on **T1** (`schemas.py`). Live status in
+[`todo.md`](./todo.md).
