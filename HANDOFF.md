@@ -8,14 +8,16 @@ Durable state for resuming work. Pointers, not duplicates:
 
 ## Current position
 
-Slice 1 (Receiver + Holding Tank), task **T0** (scaffolding). Per-task status in
-`tasks/todo.md`.
+Slice 1 (Receiver + Holding Tank). **T0 in review** —
+[PR #1](https://github.com/DaithiMartin/AgentLatch/pull/1), awaiting merge.
+Per-task status in `tasks/todo.md`.
 
 ## What exists
 
 - Spec-driven docs: `SPEC.md`, `tasks/plan.md`, `tasks/todo.md`.
 - Package skeleton `agentlatch` (uv + hatchling, `src/` layout), MIT-licensed,
-  dev tooling (pytest / ruff / mypy), smoke test.
+  dev tooling (pytest / ruff / mypy), smoke test, CI matrix (3.11/3.12), and a
+  Conventional-Commits `commit-msg` hook.
 
 ## Infra / repo facts
 
