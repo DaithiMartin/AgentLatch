@@ -33,3 +33,10 @@ Per-task status in `tasks/todo.md`.
   `git config core.hooksPath .githooks` (see `CONTRIBUTING.md`).
 - Planned Redis keys: `agentlatch:queue:{session_id}` (list);
   `agentlatch:last_speech:{session_id}` (Slice 2).
+
+## Deferred (carried-forward obligations)
+
+- **Slice 3 — Context Injector:** add the `context_injector` param to
+  `AgentLatch.__init__` (`ContextInjector | None`, keyword-only ⇒ non-breaking);
+  deliberately omitted from Slice 1 to avoid freezing a placeholder type. See
+  SPEC §3.3.
