@@ -73,8 +73,9 @@ the Holding Tank. Lives in `schemas.py` + `core.AgentLatch.enqueue()`.
 - `session_id: str` — required, non-empty.
 - `text_to_speak: str` — required, non-empty.
 - `silent_context_update: dict | None` — optional.
-- **Success criteria:** invalid body → **HTTP 422**; valid body → **HTTP 202**,
-returning in well under 50 ms (enqueue is one async Redis `RPUSH`).
+- **Success criteria:** invalid body → **HTTP 422**; valid body → **HTTP 202**
+with body `{"status": "queued"}`, returning in well under 50 ms (enqueue is one
+async Redis `RPUSH`).
 
 ### 3.2 The Holding Tank — `queue.py`
 - **Goal:** persist payloads until the user is ready.
