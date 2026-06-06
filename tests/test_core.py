@@ -46,6 +46,8 @@ async def test_rejects_non_positive_silence_threshold(redis_client: Redis) -> No
 async def test_rejects_non_positive_session_ttl(redis_client: Redis) -> None:
     with pytest.raises(ValueError):
         AgentLatch(redis_client=redis_client, session_ttl=0)
+    with pytest.raises(ValueError):
+        AgentLatch(redis_client=redis_client, session_ttl=-1)
 
 
 async def test_redis_url_constructs_lazily() -> None:
