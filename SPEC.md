@@ -94,6 +94,11 @@ developer overrides.
 - **Wiring:** an injector is optional. When `get_next_message` pops a payload that
 carries a `silent_context_update`, the engine `await`s `inject_context(...)`
 **before** returning the text, guaranteeing memory is updated prior to TTS.
+- **Constructor wiring (TO ADD in Slice 3 — deferred from Slice 1/T3):** add the
+`context_injector` parameter to `AgentLatch.__init__`, typed `ContextInjector |
+None` (default `None`), and store it for the engine to use. It is keyword-only, so
+adding it is non-breaking. It was intentionally omitted from Slice 1 to avoid
+freezing a placeholder type before `ContextInjector` existed.
 - **CRITICAL CONSTRAINT — thread safety:** memory mutation must happen only while
 the conversational LLM is idle, to avoid "dict changed size during iteration"
 style failures. AgentLatch provides a per-session `asyncio.Lock` that guards the
@@ -125,6 +130,9 @@ Redis-server-time as the canonical clock is noted as a future hardening.)
 ## 4. Public API (the "commands" surface)
 
 This is a Hyrum's-Law surface — treat every signature below as a stable contract.
+It describes the complete intended surface; each method/parameter lands in the
+slice that builds it (e.g. `get_next_message` in Slice 2; `context_injector` /
+`ContextInjector` in Slice 3) — see [`tasks/todo.md`](./tasks/todo.md).
 
 ```python
 from agentlatch import AgentLatch, ResponsePayload, ContextInjector

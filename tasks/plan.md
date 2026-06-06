@@ -89,12 +89,13 @@ These are the design decisions behind them.
 
 ### T3 — `AgentLatch` facade (`core.py`)
 - `__init__(self, *, redis_url=None, redis_client=None, silence_threshold=2.0,
-  session_ttl=3600, context_injector=None)`. Exactly one of `redis_url`/`redis_client`
+  session_ttl=3600)`. Exactly one of `redis_url`/`redis_client`
   (the client seam injects fakeredis in tests); build via `redis.asyncio.from_url`;
   validate positive numerics — else `ValueError`.
 - `enqueue(payload: ResponsePayload)` → `tank.push` (model-only, no `dict` overload).
-- `aclose()` closes the client. `__init__.py` exports `AgentLatch`, `ResponsePayload`
-  (`ContextInjector` deferred to Slice 3).
+- `aclose()` closes the client only when this instance created it. `__init__.py`
+  exports `AgentLatch`, `ResponsePayload`. `context_injector` / `ContextInjector`
+  are **deferred to Slice 3** (keyword-only, so adding the param later is non-breaking).
 
 ### T4 — FastAPI receiver (`integrations/fastapi.py`)
 - `create_router(latch) -> APIRouter`, `POST /api/v1/queue_response`, body

@@ -8,8 +8,9 @@ Durable state for resuming work. Pointers, not duplicates:
 
 ## Current position
 
-Slice 1 (Receiver + Holding Tank). T0–T1 merged; **T2 in review** —
-[PR #3](https://github.com/DaithiMartin/AgentLatch/pull/3).
+Slice 1 (Receiver + Holding Tank). T0–T2 merged; **T3 in review** —
+[PR #4](https://github.com/DaithiMartin/AgentLatch/pull/4). After it merges, the
+next gate is **CP-A** (review/freeze the public ingest API).
 Per-task status in `tasks/todo.md`.
 
 ## What exists
@@ -22,6 +23,8 @@ Per-task status in `tasks/todo.md`.
   `extra="forbid"`, non-empty whitespace-stripped strings).
 - `HoldingTank` per-session Redis FIFO queue (`agentlatch.queue`:
   `push`/`pop`/`length`, RPUSH/LPOP, TTL refreshed on write).
+- `AgentLatch` facade (`agentlatch.core`): `enqueue`, exactly-one Redis source,
+  ownership-aware `aclose`; `AgentLatch`/`ResponsePayload` exported at top level.
 
 ## Infra / repo facts
 
@@ -30,3 +33,10 @@ Per-task status in `tasks/todo.md`.
   `git config core.hooksPath .githooks` (see `CONTRIBUTING.md`).
 - Planned Redis keys: `agentlatch:queue:{session_id}` (list);
   `agentlatch:last_speech:{session_id}` (Slice 2).
+
+## Deferred (carried-forward obligations)
+
+- **Slice 3 — Context Injector:** add the `context_injector` param to
+  `AgentLatch.__init__` (`ContextInjector | None`, keyword-only ⇒ non-breaking);
+  deliberately omitted from Slice 1 to avoid freezing a placeholder type. See
+  SPEC §3.3.
