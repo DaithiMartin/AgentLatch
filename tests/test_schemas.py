@@ -82,6 +82,15 @@ def test_silent_context_update_must_be_a_mapping() -> None:
         )
 
 
+def test_silent_context_update_rejects_non_string_keys() -> None:
+    with pytest.raises(ValidationError):
+        ResponsePayload(
+            session_id="s1",
+            text_to_speak="hi",
+            silent_context_update={1: "x"},  # type: ignore[dict-item]
+        )
+
+
 def test_json_round_trip_is_lossless() -> None:
     original = ResponsePayload(
         session_id="s1",
