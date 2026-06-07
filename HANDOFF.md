@@ -8,9 +8,9 @@ Durable state for resuming work. Pointers, not duplicates:
 
 ## Current position
 
-Slice 1 (Receiver + Holding Tank). T0–T2 merged; **T3 in review** —
-[PR #4](https://github.com/DaithiMartin/AgentLatch/pull/4). After it merges, the
-next gate is **CP-A** (review/freeze the public ingest API).
+Slice 1 (Receiver + Holding Tank). T0–T3 merged, CP-A approved (ingest API
+frozen); **T4 in review** — [PR #5](https://github.com/DaithiMartin/AgentLatch/pull/5).
+After it merges, the final gate is **CP-B** (Slice 1 complete).
 Per-task status in `tasks/todo.md`.
 
 ## What exists
@@ -25,6 +25,8 @@ Per-task status in `tasks/todo.md`.
   `push`/`pop`/`length`, RPUSH/LPOP, TTL refreshed on write).
 - `AgentLatch` facade (`agentlatch.core`): `enqueue`, exactly-one Redis source,
   ownership-aware `aclose`; `AgentLatch`/`ResponsePayload` exported at top level.
+- Optional FastAPI receiver (`agentlatch.integrations.fastapi.create_router`):
+  `POST /api/v1/queue_response` → 202/422, import-guarded behind the extra.
 
 ## Infra / repo facts
 
