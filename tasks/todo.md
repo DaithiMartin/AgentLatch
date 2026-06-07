@@ -3,6 +3,9 @@
 Status tracker for the `dev-loop`. Architecture, DAG, and design notes live in
 [`plan.md`](./plan.md); intent + boundaries in [`SPEC.md`](../SPEC.md).
 
+> **Slice 1 is COMPLETE ✅** — all tasks (T0–T4) merged and both checkpoints
+> (CP-A, CP-B) approved. Next: `/plan` Slice 2 — the Delivery Engine.
+
 **Status legend:** `[ ]` pending · `[~]` PR open (link) · `[x]` merged.
 A task flips to `[x]` only on **merge** (the next task's start flips it).
 A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
@@ -55,7 +58,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   public API shape (`AgentLatch`, `ResponsePayload`) reads well before it's frozen behind HTTP.
 - **Approval:** await explicit user OK, then mark `[x]`.
 
-### T4 — `integrations/fastapi.py` · receiver  `[~]` — [PR #5](https://github.com/DaithiMartin/AgentLatch/pull/5)
+### T4 — `integrations/fastapi.py` · receiver  `[x]` — [PR #5](https://github.com/DaithiMartin/AgentLatch/pull/5) (merged)
 - **Depends on:** T3 merged, CP-A approved
 - **Do:** `create_router(latch)` → `POST /api/v1/queue_response` (body `ResponsePayload`),
   202 on valid; import-guarded with a friendly `pip install agentlatch[fastapi]` error.
@@ -64,7 +67,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   empty `session_id`, unknown extra key, non-JSON; router mounts into a bare `FastAPI()` app.
 - **Verify:** `uv run pytest tests/test_api.py`
 
-### CP-B — Slice 1 complete (human gate)  `[ ]`
+### CP-B — Slice 1 complete (human gate)  `[x]` — approved (live real-Redis smoke passed)
 - **Depends on:** T4 merged
 - **Evidence to present:** full suite + `ruff` + `mypy src` green; both ingest paths proven;
   mandatory gates hold (422 invalid / 202 valid · FIFO · TTL on write). Optional: manual

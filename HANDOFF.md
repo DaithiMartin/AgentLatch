@@ -8,9 +8,9 @@ Durable state for resuming work. Pointers, not duplicates:
 
 ## Current position
 
-Slice 1 (Receiver + Holding Tank). T0–T3 merged, CP-A approved (ingest API
-frozen); **T4 in review** — [PR #5](https://github.com/DaithiMartin/AgentLatch/pull/5).
-After it merges, the final gate is **CP-B** (Slice 1 complete).
+**Slice 1 (Receiver + Holding Tank) is COMPLETE** — T0–T4 merged, CP-A & CP-B
+approved. The library + HTTP ingest path is built, tested, and verified against a
+real Redis (live smoke). **Next: `/plan` Slice 2 (the Delivery Engine).**
 Per-task status in `tasks/todo.md`.
 
 ## What exists
