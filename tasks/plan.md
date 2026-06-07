@@ -145,5 +145,5 @@ irreversible/outward action beyond the expected PR.**
 No open decisions remain for Slice 1.
 
 ## 6. Next step
-Build proceeds task-by-task via `dev-loop`; live status and the next task are in
-[`todo.md`](./todo.md).
+**Slice 1 is complete.** Next is a `/plan` pass to break **Slice 2 (the Delivery
+Engine)** into tasks. Live status in [`todo.md`](./todo.md).
