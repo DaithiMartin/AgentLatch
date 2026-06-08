@@ -12,11 +12,13 @@ concurrency is out of scope (SPEC §1 scope discipline, §3.4 caveat). Callers
 must not poll one session from multiple loops.
 """
 
+import inspect
 import math
 from collections.abc import Callable
 
 from redis.asyncio import Redis
 
+from agentlatch.memory import ContextInjector, SessionLocks
 from agentlatch.queue import HoldingTank
 from agentlatch.schemas import ResponsePayload
 
@@ -32,12 +34,23 @@ class DeliveryEngine:
         silence_threshold: float,
         session_ttl: int,
         now: Callable[[], float],
+        injector: ContextInjector | None = None,
+        locks: SessionLocks | None = None,
     ) -> None:
+        # A ContextInjector is async by construction (the ABC enforces it); this
+        # precondition catches a non-ContextInjector duck passed by direct misuse,
+        # before any LPOP can drop a message. The public ValueError lives at the
+        # facade. (Mirrors the is_user_speaking bool-assert below.)
+        assert injector is None or inspect.iscoroutinefunction(injector.inject_context)
         self._redis = redis
         self._tank = tank
         self._silence_threshold = silence_threshold
         self._session_ttl = session_ttl
         self._now = now
+        self._injector = injector
+        # The facade passes its shared registry so memory_lock returns the same
+        # lock acquired here; a standalone engine gets its own.
+        self._locks = locks if locks is not None else SessionLocks()
 
     @staticmethod
     def _key(session_id: str) -> str:
@@ -108,4 +121,21 @@ class DeliveryEngine:
         if silence < self._silence_threshold:
             # Too soon — also holds on a negative delta from clock skew.
             return None
-        return await self._tank.pop(session_id)
+
+        payload = await self._tank.pop(session_id)
+        if payload is not None:
+            await self._maybe_inject(session_id, payload)
+        return payload
+
+    async def _maybe_inject(self, session_id: str, payload: ResponsePayload) -> None:
+        """Update the live LLM's memory before the payload reaches TTS (SPEC §3.3).
+
+        Only when the payload carries a ``silent_context_update`` and an injector
+        is configured. The per-session lock guards the call so it can't race the
+        developer's memory reads; it wraps only this await. The payload is already
+        popped, so a failing injector propagates and is not re-queued (at-most-once).
+        """
+        if payload.silent_context_update is None or self._injector is None:
+            return
+        async with self._locks.get(session_id):
+            await self._injector.inject_context(session_id, payload.silent_context_update)

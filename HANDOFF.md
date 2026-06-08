@@ -14,9 +14,10 @@ CP-A & CP-B approved. Slice 2 (Delivery Engine): T5 ([PR #8](https://github.com/
 2026-06-08**. The full library round-trip (ingest → hold → release on ≥ 2.0s silence,
 FIFO) is built, unit-tested, and **live-smoke-verified against a real Redis** with the
 real wall clock. **Slice 3 (Context Injector) is underway:** planned via `/slice-plan`
-(cross-checked 3 rounds, see `tasks/plan.md` §7) and signed off; **T7 (`memory.py`) is
-merged — [PR #10](https://github.com/DaithiMartin/AgentLatch/pull/10).** **Next: T8** (engine
-inject-before-return under the lock), then T9, then CP-D. Per-task status in `tasks/todo.md`.
+(cross-checked 3 rounds, see `tasks/plan.md` §7) and signed off; **T7 (`memory.py`) merged
+([PR #10](https://github.com/DaithiMartin/AgentLatch/pull/10)); T8 (engine inject-before-return
+under the lock) is in review — [PR #11](https://github.com/DaithiMartin/AgentLatch/pull/11).**
+**Next: T9** (facade `context_injector` + `memory_lock`), then CP-D. Per-task status in `tasks/todo.md`.
 
 ## What exists
 
@@ -32,6 +33,9 @@ inject-before-return under the lock), then T9, then CP-D. Per-task status in `ta
   records `last_speech` on speech, pops after `silence ≥ threshold` via
   timestamp diffing on an injectable clock (never `asyncio.sleep`); fails
   safe on clock skew / corrupt timestamps (reseed + hold, no early pop).
+  Runs the optional `ContextInjector` under the per-session lock **before**
+  returning a payload that carries `silent_context_update` (at-most-once on
+  failure) — T8, in review, [PR #11](https://github.com/DaithiMartin/AgentLatch/pull/11).
 - `AgentLatch` facade (`agentlatch.core`): `enqueue`, exactly-one Redis source,
   ownership-aware `aclose`; `AgentLatch`/`ResponsePayload` exported at top level.
   Delivery surface `get_next_message` (strict `StrictBool` + normalized

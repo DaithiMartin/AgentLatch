@@ -40,30 +40,35 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
         is **not** exported.
 - **Verify:** `uv run pytest tests/test_memory.py && uv run ruff check . && uv run mypy src`
 
-### T8 — `engine.py` · inject-before-return under the per-session lock  `[ ]`
-- **Depends on:** T7.
+### T8 — `engine.py` · inject-before-return under the per-session lock  `[~]` — [PR #11](https://github.com/DaithiMartin/AgentLatch/pull/11)
+- **Depends on:** T7 — merged.
 - **Do:** `DeliveryEngine.__init__` gains keyword-only `injector: ContextInjector | None = None` and
-  `locks: SessionLocks` (supplied by the facade). Replace the final `return await self._tank.pop(...)`
+  `locks: SessionLocks | None = None` (engine creates its own if not supplied; the facade passes its
+  shared registry — keeps existing engine tests green). Replace the final `return await self._tank.pop(...)`
   with: pop → if `payload.silent_context_update is not None` **and** `injector is not None`,
   `async with self._locks.get(session_id): await self._injector.inject_context(session_id,
   payload.silent_context_update)`; then `return payload`. Guard is `is not None` (empty `{}` still
   injects). At-most-once on failure (pop precedes inject — plan §4.4). Add `tests/test_inject.py` +
   a `FakeInjector` spy in `tests/conftest.py`.
-- **Acceptance:**
-  - [ ] Payload **with** `silent_context_update`, after silence ≥ threshold → `inject_context` awaited
-        with `(session_id, data)` **before** the payload is returned.
-  - [ ] During the call the per-session lock is **held** (`FakeInjector` sees
-        `engine._locks.get(sid).locked()` is `True`); it is **released** afterward (`.locked()` is
-        `False`) — and **also released** after a **raising** `inject_context`.
-  - [ ] An **empty `{}`** `silent_context_update` still triggers injection (present ≠ truthy).
-  - [ ] **No** injection when there is no `silent_context_update`; **no** injection when `injector is
-        None` → payload returned un-injected (Slice 2 regression).
-  - [ ] A raising `inject_context` **propagates** and the message is **not** returned/re-queued
-        (queue length 0 afterwards — at-most-once).
-  - [ ] Two ctx payloads release **FIFO** with an injection between each. No `asyncio.sleep`; the guard
-        is an in-process `asyncio.Lock`, never a Redis lock.
-  - [ ] Constructing `DeliveryEngine` **directly** with a sync / non-callable `injector` raises at
-        construction (precondition `assert`), so a bad injector can't fail after an `LPOP`.
+- **Acceptance:** (all met — 11 inject tests; independent Claude reviewer **PASS** (mutation-tested) +
+  Codex `cross-check mode=diff` **0 BLOCKER/0 MAJOR**; proofs hardened via cross-check — plan §7)
+  - [x] **Inject-before-return is gated** (not a race): with a **blocking** injector, the
+        `get_next_message` task is **not done** while injection blocks; after release it returns the
+        payload. (`entered.wait()` is wrapped in `asyncio.wait_for` so a non-injecting bug *fails* fast.)
+  - [x] The per-session lock is **held during** inject (also **while suspended**) and **released
+        after** — asserted on the **captured lock object** (retained past the `WeakValueDictionary`),
+        after both **success and a raising** inject; `engine._locks.get(sid)` **is** that same object.
+  - [x] An **empty `{}`** `silent_context_update` still injects (`is not None`, not truthy).
+  - [x] **No injection AND no lock acquisition** when there's no `silent_context_update`, no injector,
+        or an empty queue — a `SessionLocks` get-spy records **zero** acquisitions on those paths.
+  - [x] **At-most-once:** a raising `inject_context` records `queue.length == 0` **at inject entry**
+        (LPOP preceded inject) **and** `queue.length == 0` **after** the exception propagates (not
+        re-queued).
+  - [x] The lock wraps **only** inject: a **pop-spy** sees the session lock **unlocked during the pop**.
+  - [x] Two ctx payloads release **FIFO** with an injection between each. No `asyncio.sleep`; in-process
+        `asyncio.Lock` only, never a Redis lock.
+  - [x] Direct `DeliveryEngine` construction with a **sync** `inject_context` duck object raises
+        `AssertionError` (reaches the precondition), so a bad injector can't fail after an `LPOP`.
 - **Verify:** `uv run pytest tests/test_inject.py tests/test_engine.py && uv run ruff check . && uv run mypy src`
 
 ### T9 — `core.py` · wire `context_injector` + expose `memory_lock`  `[ ]`
