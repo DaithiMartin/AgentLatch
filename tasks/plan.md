@@ -83,9 +83,11 @@ Acceptance + Verify commands are in [`todo.md`](./todo.md). These are the decisi
 ### T7 — `memory.py` · `ContextInjector` ABC + `SessionLocks`
 - **ABC:** `class ContextInjector(abc.ABC)` with one abstract coroutine
   `async def inject_context(self, session_id: str, data: dict[str, Any]) -> None` (SPEC §3.3).
-  `@abstractmethod` only enforces the name is overridden — **not** that the override is a
-  coroutine — so the *facade* additionally checks `inspect.iscoroutinefunction` at construction
-  (§4.8, T9); the ABC docstring states the override must be `async`.
+  `@abstractmethod` alone only enforces the name is overridden — **not** that the override is a
+  coroutine — so the ABC adds an `__init_subclass__` that **rejects a non-coroutine (sync or
+  non-callable) override at class-definition time** (`inspect.iscoroutinefunction`). This is the
+  strongest, unbypassable layer (you cannot even define a sync injector), folded from the T7 diff
+  cross-check; it supersedes the facade-only check that was planned for T9 (§4.8).
 - **`SessionLocks`:** a tiny registry — `get(self, session_id: str) -> asyncio.Lock`, lazily
   creating and caching one `asyncio.Lock` per session id in a **`weakref.WeakValueDictionary`** (§4.7).
   A session's lock survives exactly while someone holds a strong ref — an in-flight injection (the
@@ -126,11 +128,12 @@ Acceptance + Verify commands are in [`todo.md`](./todo.md). These are the decisi
   payloads release **FIFO** with injection between. No `asyncio.sleep`, no Redis lock.
 
 ### T9 — `core.py` · facade wiring + the cooperation lock
-- **Constructor:** add keyword-only `context_injector: ContextInjector | None = None`. Validate: `None`,
-  **or** an instance of `ContextInjector` whose `inject_context` is a coroutine function
-  (`inspect.iscoroutinefunction`) — else **`ValueError`** (§4.8, single exception type). Own a
-  `SessionLocks`; pass `injector=context_injector, locks=self._locks` to the `DeliveryEngine`.
-  Keyword-only ⇒ non-breaking. **Public constructor change → Ask-first / gate sign-off (§4.1).**
+- **Constructor:** add keyword-only `context_injector: ContextInjector | None = None`. Validate it is
+  `None` **or** an instance of `ContextInjector`, else **`ValueError`** (§4.8). The `async`-ness of
+  `inject_context` is already guaranteed by the ABC's `__init_subclass__` (T7), so no
+  `iscoroutinefunction` check is needed here. Own a `SessionLocks`; pass
+  `injector=context_injector, locks=self._locks` to the `DeliveryEngine`. Keyword-only ⇒ non-breaking.
+  **Public constructor change → Ask-first / gate sign-off (§4.1, APPROVED).**
 - **Expose the cooperation lock** (§4.5): `def memory_lock(self, session_id: str) -> asyncio.Lock`
   returning `self._locks.get(<normalized id>)` — normalized through the **same** `NonEmptyStr`
   adapter `get_next_message`/`enqueue` use, so the developer's lock is the **same object** the
@@ -195,11 +198,14 @@ explicit approval.
    developer can cache a reference to an evicted lock and later acquire a *different* object than the
    injection uses, silently breaking mutual exclusion — weak-value storage avoids this because a
    referenced lock is never collected.
-8. **Injector validated as a coroutine function at construction.** `@abstractmethod` does not enforce
-   `async`/callable, so the facade `__init__` checks `isinstance(ContextInjector)` **and**
-   `inspect.iscoroutinefunction(injector.inject_context)`, raising **`ValueError`** — failing loud at
-   construction rather than after a `LPOP` has already dropped a message (B1/M9). The `DeliveryEngine`
-   carries the same check as a precondition `assert` for direct-construction misuse (§3 T8).
+8. **`inject_context` is enforced `async` at the ABC (revised in T7).** The `ContextInjector`
+   `__init_subclass__` rejects a non-coroutine override at **class-definition** time, so any
+   `ContextInjector` *instance* is guaranteed to have an `async inject_context` — the strongest,
+   unbypassable layer (B1/M9, folded from the T7 diff cross-check). Therefore **T9's facade check
+   simplifies to `isinstance(context_injector, ContextInjector)` (or `None`)**, raising `ValueError`
+   for anything else (e.g. `object()`); the `iscoroutinefunction` check is no longer needed at the
+   facade. The `DeliveryEngine` keeps a lightweight precondition `assert` for direct-construction
+   misuse (§3 T8).
 9. **`memory_lock` is a non-reentrant `asyncio.Lock` (deadlock contract).** SPEC §3.3 specifies a plain
    `asyncio.Lock`, which is not reentrant, so holding `memory_lock(sid)` across a `get_next_message(sid)`
    that injects would deadlock (the injection re-acquires the same lock). The contract — read under the
