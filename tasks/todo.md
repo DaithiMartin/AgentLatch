@@ -6,8 +6,8 @@ Status tracker for the `dev-loop`. Architecture, DAG, and design notes live in
 > **Slices 1 & 2 ✅ COMPLETE** — T0–T6 merged, CP-A/CP-B/CP-C approved (PRs #1–#9); the
 > ingest **and** delivery paths are built and live-smoke-verified. Full history in git.
 > **This slice (3)** injects silent context into the live LLM's memory **before** a held
-> message is spoken. Plan signed off 2026-06-08; **T7–T8 merged** (PRs #10–#11); **T9 in review**
-> (PR #12) — per-task status below.
+> message is spoken. Plan signed off 2026-06-08; **T7–T9 merged** (PRs #10–#12); **next: CP-D**
+> (Slice 3 completion gate) — per-task status below.
 
 **Status legend:** `[ ]` pending · `[~]` PR open (link) · `[x]` merged.
 A task flips to `[x]` only on **merge** (the next task's start flips it).
@@ -70,7 +70,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
         `AssertionError` (reaches the precondition), so a bad injector can't fail after an `LPOP`.
 - **Verify:** `uv run pytest tests/test_inject.py tests/test_engine.py && uv run ruff check . && uv run mypy src`
 
-### T9 — `core.py` · wire `context_injector` + expose `memory_lock`  `[~]` — [PR #12](https://github.com/DaithiMartin/AgentLatch/pull/12)
+### T9 — `core.py` · wire `context_injector` + expose `memory_lock`  `[x]` — [PR #12](https://github.com/DaithiMartin/AgentLatch/pull/12) (merged)
 - **Depends on:** T8 — merged.
 - **Do:** add keyword-only `context_injector: ContextInjector | None = None` to `AgentLatch.__init__`;
   validate it is `None` **or** a `ContextInjector` instance, else raise **`ValueError`** (async-ness is

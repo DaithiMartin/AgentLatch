@@ -95,17 +95,20 @@ developer overrides.
 - **Wiring:** an injector is optional. When `get_next_message` pops a payload that
 carries a `silent_context_update`, the engine `await`s `inject_context(...)`
 **before** returning the text, guaranteeing memory is updated prior to TTS.
-- **Constructor wiring (TO ADD in Slice 3 — deferred from Slice 1/T3):** add the
-`context_injector` parameter to `AgentLatch.__init__`, typed `ContextInjector |
-None` (default `None`), and store it for the engine to use. It is keyword-only, so
-adding it is non-breaking. It was intentionally omitted from Slice 1 to avoid
-freezing a placeholder type before `ContextInjector` existed.
+- **Constructor wiring (implemented in Slice 3 — deferred from Slice 1/T3):** the
+`context_injector` parameter on `AgentLatch.__init__` is typed `ContextInjector |
+None` (default `None`) and passed to the engine. It is keyword-only, so adding it
+was non-breaking. It was intentionally omitted from Slice 1 to avoid freezing a
+placeholder type before `ContextInjector` existed.
 - **CRITICAL CONSTRAINT — thread safety:** memory mutation must happen only while
 the conversational LLM is idle, to avoid "dict changed size during iteration"
-style failures. AgentLatch provides a per-session `asyncio.Lock` that guards the
-injection call; the documented integration contract is that the developer's
-`inject_context` (and their LLM's read of memory) cooperate via this lock /
-an idle flag.
+style failures. AgentLatch provides a per-session `asyncio.Lock` — exposed as
+`AgentLatch.memory_lock(session_id)` (§4) — that guards the injection call; the
+documented integration contract is that the developer's `inject_context` (and
+their LLM's read of memory) cooperate via this lock / an idle flag. The lock is
+non-reentrant: guard memory reads with it, but never poll `get_next_message` for
+a session while holding its `memory_lock` (the due injection would re-acquire it
+and deadlock).
 
 ### 3.4 The Delivery Engine — `engine.py`
 - **Goal:** release a held message only during a genuine pause.
@@ -148,7 +151,7 @@ Redis-server-time as the canonical clock is noted as a future hardening.)
 This is a Hyrum's-Law surface — treat every signature below as a stable contract.
 It describes the complete intended surface; each method/parameter lands in the
 slice that builds it (e.g. `get_next_message` in Slice 2; `context_injector` /
-`ContextInjector` in Slice 3) — see [`tasks/todo.md`](./tasks/todo.md).
+`ContextInjector` / `memory_lock` in Slice 3) — see [`tasks/todo.md`](./tasks/todo.md).
 
 ```python
 from agentlatch import AgentLatch, ResponsePayload, ContextInjector
@@ -167,6 +170,10 @@ await latch.enqueue(payload: ResponsePayload) -> None
 msg: ResponsePayload | None = await latch.get_next_message(
 session_id: str, is_user_speaking: bool
 )
+
+# Memory cooperation (Slice 3): guard your LLM's memory READS with the SAME lock
+# the injector runs under. Non-reentrant — never poll while holding it:
+lock: asyncio.Lock = latch.memory_lock(session_id: str)
 ```
 
 Optional FastAPI adapter:

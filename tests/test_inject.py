@@ -278,3 +278,39 @@ async def test_documented_safe_order_round_trips(redis_client, clock):
 
     assert await latch.get_next_message("s1", is_user_speaking=False) == payload
     assert injector.calls == [("s1", {"k": "v"})]  # injection ran fine after release
+
+
+# --- Non-injecting paths: assert the invariant DIRECTLY (fail fast, don't hang) ---
+
+
+async def test_speaking_path_never_pops_or_injects(redis_client, tank, clock):
+    # The speaking path must never pop or inject. Assert the invariant head-on so
+    # an "inject while speaking" regression fails fast — the gated before-return
+    # test would instead HANG under that mutation (it marks speech to set up).
+    locks = SpyLocks()
+    injector = FakeInjector(locks=locks)
+    engine = make_engine(redis_client, tank, clock, injector=injector, locks=locks)
+    payload = ResponsePayload(session_id="s1", text_to_speak="hi", silent_context_update={"k": "v"})
+    await tank.push("s1", payload)
+
+    assert await engine.get_next_message("s1", is_user_speaking=True) is None
+    assert injector.calls == []  # never injected on the speaking path
+    assert locks.get_calls == []  # …never even asked for the lock
+    assert await tank.length("s1") == 1  # …and the message is still held
+
+
+async def test_too_soon_poll_neither_pops_nor_injects(redis_client, tank, clock):
+    # A sub-threshold (too-soon) poll must not pop or inject. Assert it directly
+    # rather than relying on a later poll observing a silently drained queue.
+    locks = SpyLocks()
+    injector = FakeInjector(locks=locks)
+    engine = make_engine(redis_client, tank, clock, injector=injector, locks=locks)
+    payload = ResponsePayload(session_id="s1", text_to_speak="hi", silent_context_update={"k": "v"})
+    await tank.push("s1", payload)
+    await engine.get_next_message("s1", is_user_speaking=True)  # mark speech at t0
+    clock.advance(1.999)  # still below the 2.0s threshold
+
+    assert await engine.get_next_message("s1", is_user_speaking=False) is None
+    assert injector.calls == []  # too-soon ⇒ no injection
+    assert locks.get_calls == []  # …no lock acquired
+    assert await tank.length("s1") == 1  # …and the message was NOT popped

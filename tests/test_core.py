@@ -156,10 +156,12 @@ async def test_default_construction_has_no_injector(redis_client: Redis) -> None
 
 # A bare object, a plain function, an int, a string — none is a ContextInjector
 # instance, so the facade rejects each at construction (plan §4.8), before a bad
-# injector could fail only after a message was already dequeued.
+# injector could fail only after a message was already dequeued. `match` pins the
+# catch to the facade's real ValueError, not the engine's -O-strippable assert —
+# so dropping the facade check fails as a facade regression even under `python -O`.
 @pytest.mark.parametrize("bad", [object(), lambda s, d: None, 42, "injector"])
 async def test_rejects_non_context_injector(redis_client: Redis, bad) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="ContextInjector"):
         AgentLatch(redis_client=redis_client, context_injector=bad)
 
 
