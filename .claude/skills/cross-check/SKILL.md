@@ -66,6 +66,16 @@ rounds=3 model=gpt-5.5 effort=high`).
 Read the target and build a **grounding block** the critic gets every round. This is what makes the
 critique find *our* bugs, not textbook ones. Include:
 
+- **Intent / the "why" — so the critic argues *with* the settled rationale, not against it.** Give
+  it what is already decided and why: the project's objective and **scope discipline** (**SPEC §1–§2**
+  — the primary directive and the *Resolved design decisions* table), any carried-forward obligations
+  in **`HANDOFF.md`**, and the rationale of any **ADRs** (`docs/adr/`) the work cites. Summarize the
+  settled decisions so the critic does not burn rounds re-litigating intent that is already
+  reasoned-through (e.g. "this is deliberately single-loop / boring-solution by design"). **But do NOT
+  paste your private reasoning or this conversation** — the value of a cross-*model* check is an
+  *independent* read; over-feeding your framing anchors the critic into agreeing with you. Give it the
+  *what-and-why-decided*, then let it judge independently whether the plan executes correctly within
+  that intent.
 - **SPEC §9 Boundaries** — the Always / Ask-first / Never lists, verbatim or tightly summarized.
 - **The real seams** for this repo: never `asyncio.sleep()` to measure silence (timestamp diffing
   only); real `redis.asyncio` calls, never a Python `dict`; the clock is an injectable callable;
