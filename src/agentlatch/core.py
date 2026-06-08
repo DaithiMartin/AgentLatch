@@ -31,38 +31,37 @@ def _default_now() -> float:
     return datetime.now(UTC).timestamp()
 
 
+def _is_finite_real(value: object) -> bool:
+    # A real, finite number — never a bool (bool is an int subclass) and never
+    # NaN/inf. The bool check must precede isfinite, since isfinite(True) is True.
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(value)
+    )
+
+
 def _validate_silence_threshold(value: float) -> float:
-    # bool is an int subclass and a NaN threshold makes `silence < threshold`
-    # always False (delivering immediately), so demand a real, finite, positive
-    # number — not True/False/NaN/inf.
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError("silence_threshold must be a finite positive number")
-    if not math.isfinite(value) or value <= 0:
+    # A NaN threshold makes `silence < threshold` always False (delivering
+    # immediately), so demand a real, finite, positive number — not True/NaN/inf.
+    if not _is_finite_real(value) or value <= 0:
         raise ValueError("silence_threshold must be a finite positive number")
     return float(value)
 
 
 def _validate_session_ttl(value: int) -> int:
     # A strict positive non-bool int: a float TTL (1.0/1.5) or NaN/inf is wrong.
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("session_ttl must be a positive integer")
-    if value <= 0:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError("session_ttl must be a positive integer")
     return value
 
 
 def _validate_clock(now: Callable[[], float]) -> Callable[[], float]:
     # Catch a misbehaving injected clock at construction, mirroring the engine's
-    # finite-on-read rule (bool/NaN/inf/non-number are all invalid). isfinite(True)
-    # is True, so the bool check must come first.
+    # finite-on-read rule (bool/NaN/inf/non-number are all invalid).
     if not callable(now):
         raise ValueError("now must be a callable returning epoch seconds")
-    sample = now()
-    if (
-        isinstance(sample, bool)
-        or not isinstance(sample, (int, float))
-        or not math.isfinite(sample)
-    ):
+    if not _is_finite_real(now()):
         raise ValueError("now must return a finite number")
     return now
 
