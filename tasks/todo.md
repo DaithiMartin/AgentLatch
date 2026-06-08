@@ -6,8 +6,8 @@ Status tracker for the `dev-loop`. Architecture, DAG, and design notes live in
 > **Slices 1 & 2 ✅ COMPLETE** — T0–T6 merged, CP-A/CP-B/CP-C approved (PRs #1–#9); the
 > ingest **and** delivery paths are built and live-smoke-verified. Full history in git.
 > **This slice (3)** injects silent context into the live LLM's memory **before** a held
-> message is spoken. Plan signed off 2026-06-08; **T7 merged** (PR #10); **next: T8** —
-> per-task status below.
+> message is spoken. Plan signed off 2026-06-08; **T7–T8 merged** (PRs #10–#11); **T9 in review**
+> (PR #12) — per-task status below.
 
 **Status legend:** `[ ]` pending · `[~]` PR open (link) · `[x]` merged.
 A task flips to `[x]` only on **merge** (the next task's start flips it).
@@ -39,7 +39,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
         is **not** exported.
 - **Verify:** `uv run pytest tests/test_memory.py && uv run ruff check . && uv run mypy src`
 
-### T8 — `engine.py` · inject-before-return under the per-session lock  `[~]` — [PR #11](https://github.com/DaithiMartin/AgentLatch/pull/11)
+### T8 — `engine.py` · inject-before-return under the per-session lock  `[x]` — [PR #11](https://github.com/DaithiMartin/AgentLatch/pull/11) (merged)
 - **Depends on:** T7 — merged.
 - **Do:** `DeliveryEngine.__init__` gains keyword-only `injector: ContextInjector | None = None` and
   `locks: SessionLocks | None = None` (engine creates its own if not supplied; the facade passes its
@@ -70,8 +70,8 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
         `AssertionError` (reaches the precondition), so a bad injector can't fail after an `LPOP`.
 - **Verify:** `uv run pytest tests/test_inject.py tests/test_engine.py && uv run ruff check . && uv run mypy src`
 
-### T9 — `core.py` · wire `context_injector` + expose `memory_lock`  `[ ]`
-- **Depends on:** T8.
+### T9 — `core.py` · wire `context_injector` + expose `memory_lock`  `[~]` — [PR #12](https://github.com/DaithiMartin/AgentLatch/pull/12)
+- **Depends on:** T8 — merged.
 - **Do:** add keyword-only `context_injector: ContextInjector | None = None` to `AgentLatch.__init__`;
   validate it is `None` **or** a `ContextInjector` instance, else raise **`ValueError`** (async-ness is
   already guaranteed by the ABC's `__init_subclass__` from T7 — plan §4.8). Own a `SessionLocks`; pass
@@ -79,18 +79,26 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   asyncio.Lock` returning the lock for the **normalized** id (same `NonEmptyStr` adapter as
   `get_next_message`), with a docstring stating the read-cooperation contract (plan §4.5/§4.6). Extend
   `tests/test_inject.py` + `tests/test_core.py`. **`context_injector` + `memory_lock` are public-surface
-  changes → gate sign-off (SPEC §9 Ask-first).**
-- **Acceptance:**
-  - [ ] Round-trip: `enqueue(ResponsePayload(…, silent_context_update={…}))` then, after the injected
+  changes → gate sign-off (SPEC §9 Ask-first; APPROVED 2026-06-08).**
+- **Bundled `fix(memory)` (surfaced by the T9 diff cross-check):** T9's facade trusts the ABC's
+  async guarantee, but `ContextInjector.__init_subclass__` checked only `cls.__dict__`, so a sync method
+  inherited from a mixin (`class Bad(SyncMixin, ContextInjector)`) bypassed it → an instantiable
+  `ContextInjector` with a sync method, awaited only **after** the `LPOP` under `python -O`. Hardened to
+  resolve via the MRO (`getattr`); +2 regression tests in `tests/test_memory.py`.
+- **Acceptance:** (all met — 12 facade tests + 2 ABC-regression tests; independent Claude reviewer
+  **PASS** ×2 (facade + the memory fix, both mutation-tested) + Codex `cross-check mode=diff`
+  **CONVERGED** — R1 1 BLOCKER (the `__dict__` bypass) accepted & fixed, R2 **0 BLOCKER/0 MAJOR**)
+  - [x] Round-trip: `enqueue(ResponsePayload(…, silent_context_update={…}))` then, after the injected
         clock advances ≥ 2.0s, `get_next_message` awaits the injector's `inject_context` **then**
         returns the `ResponsePayload`.
-  - [ ] Default construction (no `context_injector`) returns the payload **un-injected** — Slice 2
+  - [x] Default construction (no `context_injector`) returns the payload **un-injected** — Slice 2
         behavior intact; exports unchanged except the new `ContextInjector` (T7).
-  - [ ] A non-`ContextInjector` (e.g. `object()`, a bare function) → `ValueError` at construction. (A
-        **sync** `inject_context` subclass can no longer be *defined* — the ABC rejects it in T7.)
-  - [ ] `memory_lock(" s1 ")` returns the **same** lock object the injection for `"s1"` acquires
+  - [x] A non-`ContextInjector` (e.g. `object()`, a bare function) → `ValueError` at construction. (A
+        **sync** `inject_context` subclass can no longer be *defined* — the ABC rejects it, now even via
+        mixin inheritance after the bundled fix.)
+  - [x] `memory_lock(" s1 ")` returns the **same** lock object the injection for `"s1"` acquires
         (normalized id) — the developer's read-lock matches the injection lock.
-  - [ ] The **documented safe order** round-trips: acquire+release `memory_lock("s1")`, then
+  - [x] The **documented safe order** round-trips: acquire+release `memory_lock("s1")`, then
         `get_next_message` injects fine. (`memory_lock` is a non-reentrant `asyncio.Lock`: holding it
         across a `get_next_message` that injects would deadlock — documented on the method, plan §4.9.)
 - **Verify:** `uv run pytest && uv run ruff check . && uv run mypy src`
