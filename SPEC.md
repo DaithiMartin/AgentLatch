@@ -306,6 +306,7 @@ and the optional FastAPI router, with tests for the 202/422 gates and FIFO.
 4. **Slice 4 — Sandbox:** docker-compose, Pipecat edge, LangGraph backend,
 manual Interruption Test.
 
-Each slice is broken into ordered, acceptance-tested tasks with
-`/agent-skills:plan` when it is reached; current position and the next step live
-in [`tasks/todo.md`](./tasks/todo.md) and [`HANDOFF.md`](./HANDOFF.md).
+Each slice is broken into ordered, acceptance-tested tasks with `/slice-plan` when
+it is reached (the repo-local planner — it cross-checks the plan with a second
+model before human sign-off); current position and the next step live in
+[`tasks/todo.md`](./tasks/todo.md) and [`HANDOFF.md`](./HANDOFF.md).
