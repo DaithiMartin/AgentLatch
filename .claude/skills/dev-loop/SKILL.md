@@ -35,21 +35,17 @@ user's **explicit approval**. Keeping these accurate is what lets a resuming ses
   file, a confirmed library call). Gather missing inputs now. If something's missing, **ask — don't guess.**
 - **Remote check (first run):** the PR step needs a GitHub remote. If `git remote -v` is empty, surface it
   and ask the user to add one (`git remote add origin …`) or confirm a fallback before you start building.
-- **Cross-check the build plan (second model) — gate on guarantee-subtlety, NOT complexity.** Run
-  **`cross-check mode=plan`** on your build plan when the task carries a guarantee a *green test could
-  pass without actually proving*: sequencing/ordering ("before"/"after"), atomicity/at-most-once,
-  concurrency/locking, identity/aliasing, timing/the no-`sleep` path, the Redis key schema, a
-  public-API change, migrations, or anything irreversible/security-sensitive. **Skip it** when a
-  passing test *is* the proof (e.g. "the ABC can't be instantiated") — raw complexity is a poor proxy
-  (a complex structure whose contract a passing test fully demonstrates needs no plan audit). Task-level
-  `mode=plan` mainly audits **test rigor** (`slice-plan` already audited design at the slice level), so
-  its yield tracks the subtlety of the *guarantee under test*. Make the call as a **one-line
-  self-assessment at the gate** — "subtlety call: run/skip `mode=plan` because <guarantee>" — for the
-  user to confirm. Fold any surviving **BLOCKER/MAJOR** in; carry the verdict + `reviewed with: <model>`
-  line into the gate.
+- **No task-level plan cross-check (deliberately dropped).** Design was already audited by `slice-plan`
+  (cross-model `mode=plan` at the slice level); test rigor is owned downstream by the **verify step**
+  (mutation testing + `cross-check mode=diff`, step 5). A per-task `mode=plan` sat between the two
+  re-auditing test rigor — measured over T5–T8 as mostly redundant with verify, and the most
+  context-heavy step in the loop, so it's dropped for loop speed (a pre-1.0 trade). **Escape hatch:** if
+  building a task surfaces a *genuinely new design or contract* the slice plan didn't settle, that's a
+  signal the **slice plan has a gap** — stop and fix `tasks/plan.md` (re-run `slice-plan`), don't paper
+  over it with a one-off task review.
 - **The gate — present, then wait.** Show: (a) the task + dependency/inputs check, (b) your build
-  plan (incorporating any cross-check changes), and (c) any **deviation** from the task as written or
-  a decision needing input, each with rationale.
+  plan, and (c) any **deviation** from the task as written or a decision needing input, each with
+  rationale.
   **Then wait for the user's go-ahead before writing code.**  ← *supervised gate*
 
 ## 1. Orient (read-only, in order)
@@ -98,12 +94,12 @@ read: **don't leak your intended solution or conclusions — but DO give it the 
 > `redis.asyncio`, never a Python `dict`; the clock stayed an injectable callable; `fastapi` stayed an
 > optional extra, never a hard core dep). Return a verdict: **pass**, or **fail** with specific findings."
 
-**For subtle tasks** (the same guarantee-subtlety trigger that gates `mode=plan` above — ordering,
-atomicity, concurrency, identity, timing), **ask the reviewer to mutation-test**: mutate the
+**Mutation-test subtle tasks (non-negotiable).** With no task-level `mode=plan`, mutation testing is now
+the **primary** test-rigor check, not a supplement — so on any task with an ordering / atomicity /
+concurrency / identity / timing guarantee, **require the reviewer to mutation-test**: mutate the
 implementation to plausible-wrong variants (fire-and-forget instead of await; `truthy` instead of
-`is not None`; lock the wrong region) and confirm a test **fails** for each. This directly measures
-whether the tests have teeth — the highest-signal check on tests for guarantees a green test can pass
-without proving.
+`is not None`; lock the wrong region) and confirm a test **fails** for each. This is the check that
+replaced the dropped plan review — do **not** let loop-speed pressure skip it.
 
 **For infra / packaging tasks** (e.g. the Dockerfile) the Verify block may not be fully runnable cold or
 pre-merge. Tell the agent what's checkable **now** (a local `docker build`, inspecting produced artifacts)
@@ -141,6 +137,14 @@ in `.claude/settings.json`). Hand-off-and-stop happens after step 7.
 Never implement a Checkpoint as a task. When the topmost item is a `CP-*`: gather its evidence — it may
 require the prior PR to **merge** first (e.g. green CI, a live round-trip) — **present it**, await the
 user's **explicit approval**, then mark it `[x]`. Then continue to the next task.
+
+**Slice-completion test audit (run at each `CP-*`).** Because the loop has no per-task plan review, every
+slice-closing checkpoint runs a dedicated **integration + mutation audit** over the slice's *whole* test
+suite — distinct from, and bigger than, the per-task verify. Spawn a fresh `agent-skills:test-engineer`
+(or `code-reviewer`) to check: does the suite cover the **cross-task** flow end-to-end (e.g.
+enqueue → silence → inject → release as one path), and do mutations **across the slice's modules** (not
+one task at a time) each fail a test? Fold any gap into a test **before** the checkpoint is approved.
+This is where slice-level test-rigor debt is caught — per-task reviews never see the seams between tasks.
 
 ## Loop rules
 - **One task, then stop. Halt at Checkpoints.**
