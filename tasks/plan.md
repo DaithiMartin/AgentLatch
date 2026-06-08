@@ -1,64 +1,78 @@
-# Plan — Slice 2: The Delivery Engine
+# Plan — Slice 3: The Context Injector
 
-> Source of truth: [`SPEC.md`](../SPEC.md) (esp. §3.4, §4, §7, §9). Per-task status,
-> Acceptance, and Verify steps live in [`todo.md`](./todo.md) (the dev-loop tracker).
-> This file owns the **architecture, dependency graph, and design notes** for this slice.
-> Workflow conventions are the repo's [`dev-loop`](../.claude/skills/dev-loop/SKILL.md) skill —
-> not restated here.
+> Source of truth: [`SPEC.md`](../SPEC.md) (esp. §3.3, §3.4, §4, §7 gate 4, §9).
+> Per-task status, Acceptance, and Verify steps live in [`todo.md`](./todo.md) (the
+> dev-loop tracker). This file owns the **architecture, dependency graph, and design
+> notes** for this slice. Workflow conventions are the repo's
+> [`dev-loop`](../.claude/skills/dev-loop/SKILL.md) skill — not restated here.
 >
-> **Previous:** Slice 1 (Receiver + Holding Tank) — COMPLETE, merged in PRs #1–#5 (T0–T4,
-> CP-A/CP-B). See [`HANDOFF.md`](../HANDOFF.md) for what exists.
+> **Previous:** Slice 1 (Receiver + Holding Tank, PRs #1–#5) and Slice 2 (Delivery
+> Engine, PRs #8–#9, CP-C approved) — COMPLETE. See [`HANDOFF.md`](../HANDOFF.md).
 
-**Created:** 2026-06-08 · **Status:** drafted — pending cross-check + human sign-off
+**Created:** 2026-06-08 · **Status:** drafted — cross-checked (see §7), pending human sign-off
 
 ---
 
 ## 1. Goal of this slice
 
-Release a held message **only during a genuine pause**. Implement `engine.py` (VAD-timed delivery)
-and wire `get_next_message` into the `AgentLatch` facade so the full library round-trip works:
+Silently update the live LLM's memory **before** a held message is spoken, so the agent
+can speak naturally about a backend result. Implement `memory.py` (the `ContextInjector`
+ABC **and** the per-session lock registry that guards mutation), wire the inject-before-
+return step into the Delivery Engine, and expose the cooperation lock on the facade:
 
 ```python
-latch = AgentLatch(redis_url="redis://localhost:6379", silence_threshold=2.0)
-await latch.enqueue(ResponsePayload(session_id="s1", text_to_speak="hi"))
+class MyInjector(ContextInjector):
+    async def inject_context(self, session_id: str, data: dict) -> None:
+        async with my_memory_guard:          # the developer's own mutation is already
+            await my_llm.update_memory(session_id, data)   # called UNDER latch.memory_lock(sid)
 
-await latch.get_next_message("s1", is_user_speaking=True)   # -> None  (records speech)
-await latch.get_next_message("s1", is_user_speaking=False)  # -> None  (silence < 2.0s)
-# …≥ 2.0s of continuous silence later…
-await latch.get_next_message("s1", is_user_speaking=False)  # -> ResponsePayload (FIFO release)
+latch = AgentLatch(redis_url="redis://…", silence_threshold=2.0, context_injector=MyInjector())
+await latch.enqueue(ResponsePayload(
+    session_id="s1", text_to_speak="your order shipped",
+    silent_context_update={"order_status": "shipped"},
+))
+# In the voice loop, the developer guards their LLM memory READS with the SAME lock:
+async with latch.memory_lock("s1"):
+    ... read memory while generating ...
+# …≥ 2.0s of silence later…
+msg = await latch.get_next_message("s1", is_user_speaking=False)
+# inject_context(...) is awaited UNDER latch.memory_lock("s1") BEFORE msg is returned →
+# the LLM's memory is updated before the text reaches TTS, with no read/write interleave.
 ```
 
 **Out of scope (later slices):**
-- **The Context Injector** (`memory.py`, `ContextInjector`, the idle `asyncio.Lock`, the
-  inject-before-return step) — **Slice 3**. In Slice 2 a popped payload carrying
-  `silent_context_update` is returned **as-is**: there is no injector yet to violate the
-  "inject before TTS" guarantee, so direct return is correct for this slice. Slice 3 inserts the
-  injection step before the return.
-- `/sandbox` (Pipecat edge, LangGraph backend) — **Slice 4**.
+- **`/sandbox`** (Pipecat edge, LangGraph backend, the live Interruption Test) — **Slice 4**.
+- A persistent/cross-process lock or lock garbage-collection — see §4.7 (v1 limitation).
 
 ---
 
 ## 2. Dependency graph
 
 ```
-queue.py · HoldingTank   (Slice 1 ✅ — pop = LPOP → FIFO; key agentlatch:queue:{session_id})
+schemas.ResponsePayload (silent_context_update field — Slice 1 ✅)
+queue.HoldingTank (LPOP/FIFO — Slice 1 ✅) · engine.DeliveryEngine (Slice 2 ✅)
  │
  ▼
-T5  engine.py · DeliveryEngine.get_next_message(session_id, is_user_speaking)
- │     · last_speech store: SET/GET agentlatch:last_speech:{session_id} (+TTL), via the injectable clock
- │     · is_user_speaking True  → record now, return None
- │     · is_user_speaking False → silence = now() − last_speech
- │          silence < threshold → None ; silence ≥ threshold → tank.pop() (None if empty)
- │     + DAMP timing tests (test_engine.py: fakeredis + injected fake clock, never sleep)
+T7  memory.py · ContextInjector ABC: async inject_context(session_id, data) -> None
+ │     + SessionLocks registry: get(session_id) -> asyncio.Lock (lazy, per-session, in-process)
+ │     + top-level export `from agentlatch import ContextInjector` (SPEC §4)
  ▼
-T6  core.py · AgentLatch.get_next_message  — strict bool validation, owns a DeliveryEngine
- │     (clock seam, default UTC wall clock), delegates. + facade/round-trip tests.
+T8  engine.py · inject-before-return under the per-session lock
+ │     pop → if payload.silent_context_update is not None AND injector is not None:
+ │              async with locks.get(session_id): await injector.inject_context(session_id, data)
+ │           return payload                       (un-injected when no injector / no ctx)
+ │     + DAMP tests (FakeInjector spy): inject ran UNDER the lock, BEFORE return; lock RELEASED
+ │       after success AND after a raising injector; empty `{}` still injects; no-injector regression
+ ▼
+T9  core.py · AgentLatch(context_injector=…) keyword-only; validate it's a ContextInjector whose
+ │     inject_context is a coroutine fn; own the SessionLocks, pass injector+locks to the engine;
+ │     expose `memory_lock(session_id) -> asyncio.Lock` (normalized id); facade round-trip tests
  │
- ╚══ CP-C ── full library delivery path proven (enqueue → silence ≥ 2.0s → FIFO release); human gate
+ ╚══ CP-D ── inject-before-TTS proven (memory updated before the payload surfaces); human gate
 ```
 
-Linear: the engine consumes the Holding Tank; the facade wires the engine. SPEC §9 already fixes the
-order ("do not start `engine.py` until `queue.py` has full coverage" — it does, Slice 1).
+Bottom-up: define the contract + lock (T7), enforce the guarantee at the engine (T8),
+expose it on the facade (T9). SPEC §9 "one module at a time" is honored.
 
 ---
 
@@ -66,146 +80,179 @@ order ("do not start `engine.py` until `queue.py` has full coverage" — it does
 
 Acceptance + Verify commands are in [`todo.md`](./todo.md). These are the decisions behind them.
 
-### T5 — `engine.py` · `DeliveryEngine`
-- **Constructor:** `DeliveryEngine(redis, tank, *, silence_threshold, session_ttl, now)` where
-  `now: Callable[[], float]` returns epoch seconds. The facade passes its existing `self._redis`,
-  `self._tank`, `self.silence_threshold`, `self.session_ttl` + the clock.
-- **last_speech store:** key `agentlatch:last_speech:{session_id}`. Writes use a **single atomic**
-  `SET key str(now()) ex=session_ttl` (not SET-then-EXPIRE, which can leave an immortal key if the
-  process dies between commands). Reads: `GET key` → `float | None`.
-- **`get_next_message(session_id, is_user_speaking)`** (SPEC §3.4 Option A):
-  - `is_user_speaking` → write `now()` to last_speech; return `None`.
-  - else → `last = GET last_speech`.
-    - **Cold start** (`last is None`): no pause has been observed yet — **seed last_speech = now()
-      (same atomic `SET … ex=session_ttl`) and return `None`**, so delivery requires ≥ threshold of
-      *subsequent observed* silence and never releases on 0s. [decision §4.2]
-    - else `silence = now() − last`. **Skew guard:** a future/negative `silence` (cross-process
-      clock skew) is clamped to hold → return `None`, never deliver on a negative delta. If
-      `silence < silence_threshold` → `None`; else `return await tank.pop(session_id)` (`None` if
-      the queue is empty).
-- The engine reads time via a small `_now()` helper that **validates the clock returned a finite
-  number** (raises loudly on `NaN`/`inf`), so a misbehaving *injected* clock fails fast instead of
-  poisoning `last_speech` or popping immediately. `is_user_speaking` is a **`bool` precondition**
-  (asserted) — the real Pydantic `StrictBool` validation is at the public facade (T6); validating at
-  both layers would be redundant.
-- **Tests** (`test_engine.py`, DAMP — one readable test per case): `fakeredis` + a controllable fake
-  clock; no `asyncio.sleep` anywhere. Cover the boundary (1.999 / 2.000 / 2.001s), empty queue,
-  **cold-start seeds the baseline and holds**, **future-timestamp holds**, **a clock returning
-  `NaN`/`inf` raises**, FIFO, and **speech racing a due delivery** (`is_user_speaking=True` when
-  silence would otherwise pop → `None`, no pop, the message stays queued).
+### T7 — `memory.py` · `ContextInjector` ABC + `SessionLocks`
+- **ABC:** `class ContextInjector(abc.ABC)` with one abstract coroutine
+  `async def inject_context(self, session_id: str, data: dict[str, Any]) -> None` (SPEC §3.3).
+  `@abstractmethod` only enforces the name is overridden — **not** that the override is a
+  coroutine — so the *facade* additionally checks `inspect.iscoroutinefunction` at construction
+  (§4.8, T9); the ABC docstring states the override must be `async`.
+- **`SessionLocks`:** a tiny registry — `get(self, session_id: str) -> asyncio.Lock`, lazily
+  creating and caching one `asyncio.Lock` per session id in a **`weakref.WeakValueDictionary`** (§4.7).
+  A session's lock survives exactly while someone holds a strong ref — an in-flight injection (the
+  engine's `async with`) or the developer's `memory_lock` block — and is GC'd once nobody does, so the
+  registry **self-cleans** with no lifetime leak while preserving lock **identity** whenever mutual
+  exclusion actually matters. Lazy creation is safe because all access is from a single event loop
+  (§4.6); `asyncio.Lock()` is loop-unbound at construction and weakly-referenceable on 3.11.
+- **Export:** add `ContextInjector` to `agentlatch/__init__.py` `__all__` (SPEC §4). (`SessionLocks`
+  stays internal — exposed only through `AgentLatch.memory_lock`.)
 
-### T6 — `core.py` · facade wiring
-- **`async def get_next_message(self, session_id, is_user_speaking) -> ResponsePayload | None`:**
-  validate both public inputs **with Pydantic** (SPEC §9): `is_user_speaking` via a `StrictBool`
-  `TypeAdapter` (rejects `int`/`str`/other with `ValidationError`, no coercion — `bool` is an `int`
-  subclass), and **`session_id` normalized via the SAME `NonEmptyStr` `schemas.py` uses** (strip +
-  non-empty `TypeAdapter`) so a lookup key always matches what `enqueue` wrote — a raw check would let
-  `" s1 "` miss the stored `s1`. Then delegate to `self._engine.get_next_message(...)`.
-- **Constructor hardening:** validate `silence_threshold` is a **finite positive non-bool** float
-  (reject `True`/`False`/`NaN`/`inf`) and `session_ttl` a **positive non-bool** `int` — `bool` is an
-  `int`/`float` subclass, and a `NaN` threshold makes `silence < threshold` always false and pops
-  immediately. (Tightens the T3 numeric checks.)
-- **Clock seam (SPEC §3.4 mandates an injectable clock):** add keyword-only
-  `now: Callable[[], float] | None = None` to `__init__` (default `datetime.now(UTC).timestamp()`).
-  Keyword-only ⇒ **non-breaking**, mirroring the deferred `context_injector`. If provided, validate
-  it is callable and returns a finite number. **This touches the public constructor → needs human
-  sign-off at the gate (SPEC §9 Ask-first); see §4.1.** Build `self._engine` in `__init__`.
-- **Tests:** facade round-trip with an injected fake clock — `None` while speaking / short silence;
-  payload after enqueue + sufficient silence; non-`bool` raises; a `" s1 "`-vs-`s1` key-match test;
-  FIFO end-to-end.
+### T8 — `engine.py` · inject-before-return under the per-session lock
+- **Engine gains** keyword-only `injector: ContextInjector | None = None` and `locks: SessionLocks`
+  (the facade always supplies the registry it also exposes — §4.5). `__init__` asserts the precondition
+  `injector is None or inspect.iscoroutinefunction(injector.inject_context)` — mirroring the existing
+  `is_user_speaking` bool-assert, this catches a bad injector passed via **direct** engine construction
+  at construction time (before any `LPOP`); the user-facing `ValueError` lives at the facade (§4.8).
+- **Wiring** (replaces the final `return await self._tank.pop(session_id)`):
+  ```
+  payload = await self._tank.pop(session_id)
+  if payload is not None and payload.silent_context_update is not None and self._injector is not None:
+      async with self._locks.get(session_id):
+          await self._injector.inject_context(session_id, payload.silent_context_update)
+  return payload
+  ```
+  Realises SPEC §3.4 (*LPOP → if `silent_context_update` run the injector under the lock → return*).
+  The guard is **`is not None`**, not truthiness, so an **empty `{}`** context update still injects
+  (it is "present"). The lock wraps **only** the `inject_context` await.
+- **At-most-once on failure** (§4.4): LPOP precedes inject, so a raising `inject_context` propagates
+  and the popped message is **not** returned or re-queued. `async with` releases the lock on both the
+  success and exception paths.
+- **Tests** (`test_inject.py`, DAMP — fakeredis + injected clock + a `FakeInjector` spy in
+  `conftest.py`): a payload with `silent_context_update` after sufficient silence → `inject_context`
+  awaited with `(session_id, data)` **before** return; the per-session lock is **held** during the
+  call (`FakeInjector` checks `engine._locks.get(sid).locked()` is True) **and released** afterward;
+  the lock is also released after a **raising** injector; an **empty `{}`** still injects; **no**
+  injection without `silent_context_update`; **no** injection when `injector is None` (un-injected
+  return = Slice 2 regression); a raising injector **propagates** + leaves the queue empty; two ctx
+  payloads release **FIFO** with injection between. No `asyncio.sleep`, no Redis lock.
 
-### CP-C — Slice 2 complete (human gate)
-Evidence: full suite + `ruff` + `mypy src` green; SPEC §7 gate 2 holds (None when speaking, None when
-`silence < 2.0s`, payload only when `silence ≥ 2.0s` and the queue is non-empty); FIFO on delivery;
-no-`sleep` respected (injected clock); last_speech key set with TTL. Optional: a live real-Redis
-round-trip smoke. Then await explicit approval.
+### T9 — `core.py` · facade wiring + the cooperation lock
+- **Constructor:** add keyword-only `context_injector: ContextInjector | None = None`. Validate: `None`,
+  **or** an instance of `ContextInjector` whose `inject_context` is a coroutine function
+  (`inspect.iscoroutinefunction`) — else **`ValueError`** (§4.8, single exception type). Own a
+  `SessionLocks`; pass `injector=context_injector, locks=self._locks` to the `DeliveryEngine`.
+  Keyword-only ⇒ non-breaking. **Public constructor change → Ask-first / gate sign-off (§4.1).**
+- **Expose the cooperation lock** (§4.5): `def memory_lock(self, session_id: str) -> asyncio.Lock`
+  returning `self._locks.get(<normalized id>)` — normalized through the **same** `NonEmptyStr`
+  adapter `get_next_message`/`enqueue` use, so the developer's lock is the **same object** the
+  injection acquires. Its docstring states the contract: *guard your LLM memory reads with
+  `async with latch.memory_lock(session_id)`; AgentLatch calls `inject_context` under this lock.*
+  **Deadlock footgun (§4.9):** the lock is a plain non-reentrant `asyncio.Lock`, so the docstring also
+  warns — **never call `get_next_message` for a session while already holding its `memory_lock`**: a due
+  injection re-acquires the same lock and the task deadlocks. Acquire `memory_lock` around reads only;
+  release it before polling.
+- **Tests** (extend `test_inject.py` + `test_core.py`): round-trip — enqueue a payload with
+  `silent_context_update`, advance the clock ≥ 2.0s → the injector's `inject_context` is awaited
+  (spy) **then** the `ResponsePayload` is returned; default construction (no injector) returns the
+  payload **un-injected**; a non-`ContextInjector` (e.g. `object()`) **or** a `ContextInjector`
+  subclass whose `inject_context` is **sync**/non-callable → `ValueError` at construction;
+  `memory_lock(" s1 ")` returns the **same** lock object the injection for `"s1"` acquires; and the
+  **documented safe order** round-trips — acquire+release `memory_lock("s1")`, then `get_next_message`
+  injects fine (proving the contract, not the deadlock).
+
+### CP-D — Slice 3 complete (human gate)
+Evidence: full suite + `ruff` + `mypy src` green; SPEC §7 gate 4 holds (`inject_context` awaited
+**under `memory_lock`**, **before** the payload is returned, **only** when `silent_context_update`
+is present **and** an injector is configured); the no-injector path is unchanged (un-injected return);
+injection ordering proven (memory updated before the text surfaces); `memory_lock` returns the same
+lock the injection uses. Optional: a live real-Redis round-trip with a real injector. Then await
+explicit approval.
 
 ---
 
-## 4. Decisions (revised after cross-check — see §7)
+## 4. Decisions
 
-1. **Clock seam exposure — APPROVED at the gate (2026-06-08): keyword-only `now` on
-   `AgentLatch.__init__`** (default UTC wall clock; non-breaking, mirrors the deferred
-   `context_injector`). SPEC §3.4 mandates an injectable clock; the intent-grounded re-run did not
-   object, only requiring it be finite-validated (done). Honors SPEC §9 Ask-first via this sign-off.
-2. **Cold-start last_speech ⇒ seed baseline + hold (revised).** No last_speech + not speaking →
-   **seed last_speech = now and return `None`**; delivery then needs ≥ threshold of subsequent
-   observed silence, so a message never releases on 0s. *(Was "deliver immediately"; changed per the
-   cross-check BLOCKER.)*
-3. **Silence boundary is `≥` threshold:** exactly `2.000s` of silence **delivers**.
-4. **last_speech write is atomic** `SET … ex=session_ttl` (one command, not SET-then-EXPIRE).
-5. **Negative/future silence is clamped to hold:** a last_speech timestamp in the future
-   (cross-process skew) yields `silence ≤ 0` → `None`, never deliver on a negative delta.
-6. **`silent_context_update` returned un-injected in Slice 2** (injector is Slice 3) — a deliberate
-   seam, documented in code.
-7. **Both public inputs validated with Pydantic (SPEC §9):** `is_user_speaking` via `StrictBool`
-   (`ValidationError`, no coercion), `session_id` normalized via the schemas `NonEmptyStr` so delivery
-   keys match enqueue keys.
-8. **Strict finite-numeric constructor validation:** `silence_threshold` finite-positive **non-bool**
-   (reject `True`/`False`/`NaN`/`inf`); `session_ttl` positive **non-bool** `int` (reject
-   `True`/`False`/`1.5`/`NaN`/`inf`). (`bool` is an `int`/`float` subclass.) Manual strict checks are
-   fine — a full Pydantic model for two scalars is over-engineering; both params get the invalid-type
-   tests.
+1. **`context_injector` keyword-only on `__init__`** (`ContextInjector | None`, default `None`).
+   Pre-planned in SPEC §3.3/§4; non-breaking. Ask-first public signature → **human sign-off at the
+   gate** (mirrors the `now` seam in Slice 2).
+2. **Injection lives in the ENGINE, not the facade.** SPEC §3.4 explicitly describes inject-before-
+   return as the Delivery Engine's behavior. The new engine→`memory` dependency is internal/downward,
+   not public API. (Considered facade-orchestration; rejected — §3.4 is the source of truth.)
+3. **Per-session `asyncio.Lock`, in-process, guarding only the `inject_context` await.** It protects
+   **in-process LLM memory**, and the single-loop-per-session contract (SPEC §3.4, normative since
+   Slice 2) means one process owns a session's loop. A Redis/distributed lock would be the wrong
+   layer **and** broker-scope creep (§1/§6).
+4. **At-most-once on injection failure.** Per §3.4 ordering (LPOP → inject → return), the message is
+   already popped when injection runs; a raising `inject_context` propagates and the message is not
+   returned or re-queued. Documented in the **public `get_next_message` docstring** so users know a
+   failing injector drops the dequeued message (M7).
+5. **Expose `memory_lock(session_id)` THIS slice (revised — was "defer").** The cross-check showed a
+   deferred accessor makes the lock **decorative**: without it, consumers cannot put their LLM memory
+   **reads** under AgentLatch's lock, so §3.3's read/write safety contract is unsatisfiable and §9
+   "never mutate memory without the guard" cannot hold end-to-end. So the `SessionLocks` registry
+   lives in `memory.py` (shared), the facade **owns and exposes** it, and the cooperation contract is
+   documented. Public-surface addition → routed to the gate (§5).
+6. **One event loop per `AgentLatch` instance (normative).** `asyncio.Lock` is loop-affine and the
+   registry's lazy creation assumes single-event-loop access. This extends the single-loop-per-session
+   contract; documented on `memory_lock` and the class. (No cross-thread locking — that would be
+   over-engineering for an async-first library.)
+7. **Lock-registry self-cleans via `weakref.WeakValueDictionary` (no leak).** The registry holds locks
+   by **weak** reference, so a session's `asyncio.Lock` lives exactly as long as a strong reference
+   exists — an in-flight injection's `async with`, or a developer's `memory_lock` block — and is
+   garbage-collected once unreferenced. This preserves lock **identity** at every instant mutual
+   exclusion matters (both parties are in an `async with`, so both hold strong refs to the *same* live
+   object) while bounding memory to *referenced* locks, not *all sessions ever seen*. A bounded-LRU
+   that evicts unlocked locks was **rejected**: once `memory_lock` exposes raw lock identity, a
+   developer can cache a reference to an evicted lock and later acquire a *different* object than the
+   injection uses, silently breaking mutual exclusion — weak-value storage avoids this because a
+   referenced lock is never collected.
+8. **Injector validated as a coroutine function at construction.** `@abstractmethod` does not enforce
+   `async`/callable, so the facade `__init__` checks `isinstance(ContextInjector)` **and**
+   `inspect.iscoroutinefunction(injector.inject_context)`, raising **`ValueError`** — failing loud at
+   construction rather than after a `LPOP` has already dropped a message (B1/M9). The `DeliveryEngine`
+   carries the same check as a precondition `assert` for direct-construction misuse (§3 T8).
+9. **`memory_lock` is a non-reentrant `asyncio.Lock` (deadlock contract).** SPEC §3.3 specifies a plain
+   `asyncio.Lock`, which is not reentrant, so holding `memory_lock(sid)` across a `get_next_message(sid)`
+   that injects would deadlock (the injection re-acquires the same lock). The contract — read under the
+   lock, release, then poll — is documented on `memory_lock` and proven by a safe-order test (§3 T9). A
+   reentrant lock would deviate from §3.3 and is out of scope.
 
 ## 5. Open questions (for the human gate)
-- **Concurrency — RESOLVED to document (Claude + the intent-grounded cross-check re-run agree).**
-  Concurrent `get_next_message` polls for one session could both pass the silence gate and both
-  `LPOP`. With the single-loop intent foregrounded, the re-run **withdrew its earlier lock proposal**
-  and said to commit to documentation. **Decision:** no Redis lock / Lua (it would contradict SPEC §1
-  scope discipline and §6 "boring solution") — make the one-audio-loop-per-session-per-process
-  contract **normative** in SPEC §3.4 **and** the `get_next_message` docstring, asserted as a **T6
-  acceptance item**. Revisit only if multi-loop ever enters scope.
-- Does delivery need to refresh the **queue key TTL** on read? (Likely no — set-on-write suffices.)
+**These public-surface items need sign-off BEFORE T9 is implemented** — at this plan gate, and reaffirmed
+at T9's dev-loop build gate before any code is written (not after T9 is built/merged).
+- **Confirm `context_injector` constructor addition** (Ask-first, pre-planned in SPEC §3.3/§4).
+- **Expose `memory_lock(session_id)` (RECOMMEND YES).** A public-surface addition (SPEC §4 does not list
+  it, though §3.3 implies it). The cross-check established that without it the lock is decorative and the
+  memory-safety contract is unsatisfiable (§4.5). Recommend adding it now, with the non-reentrancy
+  deadlock contract documented (§4.9).
+- _(Lock-registry growth is no longer an open question — solved in v1 by the `WeakValueDictionary`
+  registry, §4.7.)_
 
 ## 6. Next step
 `dev-loop` always picks up the topmost unchecked, dependency-ready task in
-[`todo.md`](./todo.md) — the live status tracker. (This file owns the architecture,
-not the cursor.)
+[`todo.md`](./todo.md) — the live status tracker. (This file owns the architecture, not the cursor.)
 
 ## 7. Cross-check record
-Reviewed with **gpt-5.5** (effort=high) via `cross-check mode=plan`. **Verdict: CONVERGED in 3 rounds**
-(1 BLOCKER + 6 MAJOR → 1 + 4 → 0 + 1; every finding accepted-and-folded except the concurrency lock,
-which Claude rejected with a logged reason and routed to the gate).
+Reviewed with **gpt-5.5** (effort=high) via `cross-check mode=plan`.
 
-**Round 1:**
-- **BLOCKER — cold start delivers on 0s observed silence** → **accepted**: seed baseline + hold (§4.2).
-- **MAJOR — public `now` is an Ask-first signature change** → **accepted**: routed to the human gate (§4.1).
-- **MAJOR — SET-then-EXPIRE is non-atomic** → **accepted**: atomic `SET … ex=` (§4.4).
-- **MAJOR — cross-process clock skew / negative delta** → **accepted**: clamp to hold + test (§4.5).
-- **MAJOR — `session_id` not normalized like `ResponsePayload`** → **accepted**: reuse `NonEmptyStr` (§4.7, T6).
-- **MAJOR — missing SPEC §7 "speech races the pop" DAMP test** → **accepted**: added to T5/T6 tests.
-- **MAJOR — silence-check + LPOP not atomic (add a lock)** → **rejected, with reason**: single-loop
-  contract; a lock contradicts SPEC §1/§6 (§5).
-- **MINOR — validate an injected `now` is callable/finite** → **recorded**: folded into T6.
+**Round 1 — 2 BLOCKER + 5 MAJOR + 2 MINOR (all accepted/folded):**
+- **BLOCKER — `@abstractmethod` doesn't enforce `async`/callable** → coroutine-fn validation at
+  construction (§4.8).
+- **BLOCKER — deferring `memory_lock` makes the lock decorative** → expose it now; registry moved to
+  `memory.py`; read-cooperation contract documented (§4.5).
+- MAJOR — truthy guard skips empty `{}` → `is not None` everywhere (§3 T8).
+- MAJOR — lock-registry growth → documented limitation (§4.7); _build-GC rejected, then re-framed R2._
+- MAJOR — lazy-lock single-loop assumption → "one event loop per instance" normative (§4.6).
+- MAJOR — `.locked()` only proves an instant → assert lock released after success **and** exception (§3 T8).
+- MAJOR — at-most-once undocumented for users → public `get_next_message` docstring note (§4.4).
+- MINOR — §1 "+ lock" vs T7 → reconciled (registry now in `memory.py`). MINOR — pick one exception → `ValueError`.
 
-**Round 2 (re-review of the revisions):**
-- **BLOCKER — `NaN`/`inf` `silence_threshold` passes validation, pops immediately** → **accepted**:
-  finite-numeric constructor validation (§4.8).
-- **MAJOR — cold-start seed lacked an explicit TTL** → **accepted**: every last_speech write
-  (incl. cold-start) is atomic `SET … ex=session_ttl`.
-- **MAJOR — `enqueue("s1", …)` test shorthand implied a signature change** → **accepted**: test uses
-  `enqueue(ResponsePayload(session_id="s1", …))`.
-- **MAJOR — `is_user_speaking` validated manually, not via Pydantic (§9)** → **accepted**: `StrictBool`
-  TypeAdapter (§4.7).
-- **MAJOR — concurrency only documented** → **accepted (strengthened)**: make it normative in
-  SPEC §3.4 + the public docstring; lock still rejected (single-loop contract, §5).
+**Round 2 — 0 BLOCKER + 3 MAJOR + 1 MINOR (all accepted/folded):**
+- MAJOR — engine bypasses injector validation on direct construction → precondition `assert` in
+  `DeliveryEngine.__init__` (§3 T8, §4.8).
+- MAJOR — `memory_lock` non-reentrant ⇒ deadlock if held across `get_next_message` → documented
+  acquisition-order contract + safe-order test (§4.9, §3 T9).
+- MAJOR — §4.7 understated the leak → corrected to *total distinct sessions over instance lifetime*;
+  bounded-LRU recorded as the future fix; build-vs-defer routed to the gate (§4.7, §5).
+- MINOR — sign-off timing → stated as required **before** implementing T9 (§5).
 
-**Round 3 (verification):**
-- **MAJOR — make `silence_threshold`/`session_ttl` strictly non-bool, with `True`/`False`/`NaN`/`inf`
-  tests** → **accepted**: strict finite-numeric validation (§4.8). **0 BLOCKERs — loop converged.**
+**Round 3 (verification) — 0 BLOCKER + 2 MAJOR. Verdict: CONVERGED at the rounds cap.**
+- MAJOR — recorded bounded-LRU future fix is unsound once locks are public (cached ref to an evicted
+  lock ≠ injection's new lock) → **accepted**: replaced with a **`weakref.WeakValueDictionary`** registry
+  that self-cleans while preserving identity (§4.7) — this also *supersedes* the round-2 leak limitation.
+- MAJOR — engine precondition `assert` is stripped under `python -O` → **rejected, with reason**: the
+  facade (the only public surface) validates with a real `raise ValueError`, not an assert; the engine
+  assert is an internal dev-time precondition matching the merged Slice-2 `is_user_speaking` bool-assert,
+  and the unguarded case is direct-engine-construction + `-O` + a bad injector (knowing internal misuse).
 
-**Re-run (fresh session, with *intent grounding* — SPEC §1–§2 + §3.4 caveat + §6 + HANDOFF):**
-- **Concurrency** → with the single-loop intent foregrounded, the critic **withdrew its lock proposal**
-  and endorsed documenting the contract → **accepted**, resolved to document (§5). *This validates that
-  intent grounding ends re-litigation of settled rationale.*
-- **MAJOR — clock validated only at construction; later `NaN`/`inf` poisons state** → **accepted**:
-  finite-on-read `_now()` helper (T5).
-- **MAJOR — `session_ttl` invalid-type tests missing** → **accepted** (coverage); the "use a Pydantic
-  model" framing **rejected** (manual strict checks suffice, §4.8).
-- **BLOCKER — engine trusts `is_user_speaking` before T6 validates** → **downgraded/rejected**: the
-  engine is not a public surface until T6 wires it; bool precondition + StrictBool at the facade
-  (double-validation rejected, T5).
-- **MINOR — `session_id` adapter coerces `bytes`** → **rejected, with reason**: must match `enqueue`'s
-  existing `NonEmptyStr` handling, or ingest and delivery would diverge.
-- The intent grounding **did not induce sycophancy** — the re-run still surfaced new correctness gaps
-  (clock-on-read, test coverage); it only stopped re-arguing settled intent.
+**Verdict: CONVERGED** (rounds used: 3). One logged rejection (engine `-O` assert); the WeakValueDictionary
+fix landed in the final round, so it carries no further critic pass — flagged for the implementer's tests.
