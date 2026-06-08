@@ -5,8 +5,9 @@ Status tracker for the `dev-loop`. Architecture, DAG, and design notes live in
 
 > **Slice 1 ✅ COMPLETE** — T0–T4 merged, CP-A/CP-B approved (PRs #1–#5); the ingest path
 > is built and verified. Full history in git + [`HANDOFF.md`](../HANDOFF.md).
-> **This slice (2)** builds the delivery path — T5 merged, T6 in review; **next: CP-C**
-> (the Slice 2 human gate). Per-task status below.
+> **Slice 2 ✅ COMPLETE** — T5 + T6 merged (PRs #8–#9), CP-C approved 2026-06-08; the
+> delivery path is built and live-smoke-verified. **Next: Slice 3** (Context Injector),
+> pending a fresh [`/slice-plan`](../.claude/skills/slice-plan/SKILL.md).
 
 **Status legend:** `[ ]` pending · `[~]` PR open (link) · `[x]` merged.
 A task flips to `[x]` only on **merge** (the next task's start flips it).
@@ -40,7 +41,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   - [x] No `asyncio.sleep` anywhere in `engine.py` or its tests (timestamp diffing only).
 - **Verify:** `uv run pytest tests/test_engine.py && uv run ruff check . && uv run mypy src`
 
-### T6 — `core.py` · wire `get_next_message` into the facade  `[~]` — [PR #9](https://github.com/DaithiMartin/AgentLatch/pull/9)
+### T6 — `core.py` · wire `get_next_message` into the facade  `[x]` — [PR #9](https://github.com/DaithiMartin/AgentLatch/pull/9) (merged)
 - **Depends on:** T5 — merged.
 - **Do:** `AgentLatch.get_next_message(session_id, is_user_speaking)` — validate with Pydantic
   (SPEC §9): `is_user_speaking` via a `StrictBool` `TypeAdapter` (`ValidationError`, no coercion),
@@ -66,13 +67,14 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   - [x] Default construction (no `now`) uses a UTC wall clock; public exports unchanged.
 - **Verify:** `uv run pytest && uv run ruff check . && uv run mypy src`
 
-### CP-C — Slice 2 complete · delivery path proven (human gate)  `[ ]`
+### CP-C — Slice 2 complete · delivery path proven (human gate)  `[x]` — approved 2026-06-08
 - **Depends on:** T6 merged.
-- **Evidence to present:** full suite + `ruff` + `mypy src` green; SPEC §7 gate 2 holds (None when
+- **Evidence presented:** full suite (84) + `ruff` + `mypy src` green; SPEC §7 gate 2 holds (None when
   speaking; None when `silence < 2.0s`; payload only when `silence ≥ 2.0s` **and** queue non-empty);
-  FIFO on delivery; no-`sleep` respected; last_speech key set with TTL. Optional: a live real-Redis
-  round-trip smoke (enqueue → wait > 2s → release).
-- **Approval:** await explicit user OK, then mark `[x]`.
+  FIFO on delivery; no-`sleep` respected; last_speech key set with bounded TTL. **Live real-Redis
+  round-trip smoke PASSED** (real `redis:alpine`, real wall clock, real 2.2s wait → FIFO release of
+  `hello` then `world`, then `None` on the drained queue; `last_speech` TTL = 3600).
+- **Approval:** ✅ explicit user OK 2026-06-08.
 
 ---
 

@@ -8,13 +8,13 @@ Durable state for resuming work. Pointers, not duplicates:
 
 ## Current position
 
-**Slice 1 COMPLETE** — T0–T4 merged, CP-A & CP-B approved; the library + HTTP
-ingest path is built, tested, and live-smoke-verified. **Slice 2 (Delivery Engine)
-is nearly done:** planned via `/slice-plan` (cross-checked, see `tasks/plan.md` §7);
-**T5 (`engine.py`) is merged** ([PR #8](https://github.com/DaithiMartin/AgentLatch/pull/8)),
-and **T6 (wire `get_next_message` into the facade) is in review —
-[PR #9](https://github.com/DaithiMartin/AgentLatch/pull/9).** **Next: CP-C** (Slice 2
-human gate, after T6 merges). Per-task status in `tasks/todo.md`.
+**Slices 1 & 2 COMPLETE.** Slice 1 (Receiver + Holding Tank): T0–T4 merged,
+CP-A & CP-B approved. Slice 2 (Delivery Engine): T5 ([PR #8](https://github.com/DaithiMartin/AgentLatch/pull/8))
++ T6 ([PR #9](https://github.com/DaithiMartin/AgentLatch/pull/9)) merged, **CP-C approved
+2026-06-08**. The full library round-trip (ingest → hold → release on ≥ 2.0s silence,
+FIFO) is built, unit-tested, and **live-smoke-verified against a real Redis** with the
+real wall clock. **Next: Slice 3** (Context Injector) — needs a fresh `/slice-plan`
+before any dev-loop task. Per-task status in `tasks/todo.md`.
 
 ## What exists
 
@@ -33,8 +33,8 @@ human gate, after T6 merges). Per-task status in `tasks/todo.md`.
 - `AgentLatch` facade (`agentlatch.core`): `enqueue`, exactly-one Redis source,
   ownership-aware `aclose`; `AgentLatch`/`ResponsePayload` exported at top level.
   Delivery surface `get_next_message` (strict `StrictBool` + normalized
-  `session_id`, injectable `now` clock seam) lands in T6 — in review,
-  [PR #9](https://github.com/DaithiMartin/AgentLatch/pull/9).
+  `session_id`, injectable `now` clock seam) — merged (T6,
+  [PR #9](https://github.com/DaithiMartin/AgentLatch/pull/9)).
 - Optional FastAPI receiver (`agentlatch.integrations.fastapi.create_router`):
   `POST /api/v1/queue_response` → 202/422, import-guarded behind the extra.
 
