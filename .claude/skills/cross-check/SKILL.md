@@ -66,6 +66,16 @@ rounds=3 model=gpt-5.5 effort=high`).
 Read the target and build a **grounding block** the critic gets every round. This is what makes the
 critique find *our* bugs, not textbook ones. Include:
 
+- **Intent / the "why" — so the critic argues *with* the settled rationale, not against it.** Give
+  it what is already decided and why: the project's objective and **scope discipline** (**SPEC §1–§2**
+  — the primary directive and the *Resolved design decisions* table), any carried-forward obligations
+  in **`HANDOFF.md`**, and the rationale of any **ADRs** (`docs/adr/`) the work cites. Summarize the
+  settled decisions so the critic does not burn rounds re-litigating intent that is already
+  reasoned-through (e.g. "this is deliberately single-loop / boring-solution by design"). **But do NOT
+  paste your private reasoning or this conversation** — the value of a cross-*model* check is an
+  *independent* read; over-feeding your framing anchors the critic into agreeing with you. Give it the
+  *what-and-why-decided*, then let it judge independently whether the plan executes correctly within
+  that intent.
 - **SPEC §9 Boundaries** — the Always / Ask-first / Never lists, verbatim or tightly summarized.
 - **The real seams** for this repo: never `asyncio.sleep()` to measure silence (timestamp diffing
   only); real `redis.asyncio` calls, never a Python `dict`; the clock is an injectable callable;
@@ -98,11 +108,17 @@ codex exec -s read-only \
   -c model="$model" -c model_reasoning_effort="$effort" \
   --json -o /tmp/cross-check.txt \
   "$REVIEW_PROMPT" \
-  2>/dev/null | grep '"type":"thread.started"'
+  </dev/null 2>/dev/null | grep '"type":"thread.started"'
 ```
 Parse `thread_id` from the `{"type":"thread.started","thread_id":"..."}` line → `THREAD_ID`. The
 critique lands in `/tmp/cross-check.txt`. If neither the `thread.started` line nor the file appears,
 the run failed (auth/model) → **degrade** (Step 5).
+
+> **Always close stdin (`</dev/null`) on every `codex exec` call.** `codex exec` reads stdin *in
+> addition to* the prompt argument; if stdin is left open (e.g. when the call is backgrounded) it
+> blocks **forever** on `Reading additional input from stdin...` — the process sits at ~0% CPU with no
+> output and looks "slow" when it is actually hung. Verified the hard way: a backgrounded review hung
+> 28 minutes using 0.1s of CPU before this was added.
 
 **Rounds 2..rounds** (resume the SAME session — it remembers its earlier critiques; force read-only
 *and* re-pin the model because `resume` rejects `-s`):
@@ -112,7 +128,7 @@ codex exec resume "$THREAD_ID" \
   -c model="$model" -c model_reasoning_effort="$effort" \
   --json -o /tmp/cross-check.txt \
   "I revised the $mode. Re-review the same target. Same rules and same output format." \
-  2>/dev/null >/dev/null
+  </dev/null 2>/dev/null >/dev/null
 ```
 
 **Each round, after the critic returns:**

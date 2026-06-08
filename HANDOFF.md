@@ -8,10 +8,12 @@ Durable state for resuming work. Pointers, not duplicates:
 
 ## Current position
 
-**Slice 1 (Receiver + Holding Tank) is COMPLETE** — T0–T4 merged, CP-A & CP-B
-approved. The library + HTTP ingest path is built, tested, and verified against a
-real Redis (live smoke). **Next: `/slice-plan` Slice 2 (the Delivery Engine).**
-Per-task status in `tasks/todo.md`.
+**Slice 1 COMPLETE** — T0–T4 merged, CP-A & CP-B approved; the library + HTTP
+ingest path is built, tested, and live-smoke-verified. **Slice 2 (Delivery Engine)
+is underway:** planned via `/slice-plan` (cross-checked, see `tasks/plan.md` §7), and
+**T5 (`engine.py`) is in review — [PR #8](https://github.com/DaithiMartin/AgentLatch/pull/8).**
+**Next: T6** (wire `get_next_message` into the facade), then CP-C. Per-task status in
+`tasks/todo.md`.
 
 ## What exists
 
@@ -33,8 +35,9 @@ Per-task status in `tasks/todo.md`.
 - GitHub: <https://github.com/DaithiMartin/AgentLatch> (public).
 - Commit format enforced by `.githooks/commit-msg`; contributors enable it with
   `git config core.hooksPath .githooks` (see `CONTRIBUTING.md`).
-- Planned Redis keys: `agentlatch:queue:{session_id}` (list);
-  `agentlatch:last_speech:{session_id}` (Slice 2).
+- Redis key scheme (owned by SPEC §3.2 / §3.4): `agentlatch:queue:{session_id}`
+  (list, live since Slice 1); `agentlatch:last_speech:{session_id}` (Delivery
+  Engine — T5, in review · [PR #8](https://github.com/DaithiMartin/AgentLatch/pull/8)).
 
 ## Deferred (carried-forward obligations)
 
