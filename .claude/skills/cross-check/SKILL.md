@@ -108,11 +108,17 @@ codex exec -s read-only \
   -c model="$model" -c model_reasoning_effort="$effort" \
   --json -o /tmp/cross-check.txt \
   "$REVIEW_PROMPT" \
-  2>/dev/null | grep '"type":"thread.started"'
+  </dev/null 2>/dev/null | grep '"type":"thread.started"'
 ```
 Parse `thread_id` from the `{"type":"thread.started","thread_id":"..."}` line → `THREAD_ID`. The
 critique lands in `/tmp/cross-check.txt`. If neither the `thread.started` line nor the file appears,
 the run failed (auth/model) → **degrade** (Step 5).
+
+> **Always close stdin (`</dev/null`) on every `codex exec` call.** `codex exec` reads stdin *in
+> addition to* the prompt argument; if stdin is left open (e.g. when the call is backgrounded) it
+> blocks **forever** on `Reading additional input from stdin...` — the process sits at ~0% CPU with no
+> output and looks "slow" when it is actually hung. Verified the hard way: a backgrounded review hung
+> 28 minutes using 0.1s of CPU before this was added.
 
 **Rounds 2..rounds** (resume the SAME session — it remembers its earlier critiques; force read-only
 *and* re-pin the model because `resume` rejects `-s`):
@@ -122,7 +128,7 @@ codex exec resume "$THREAD_ID" \
   -c model="$model" -c model_reasoning_effort="$effort" \
   --json -o /tmp/cross-check.txt \
   "I revised the $mode. Re-review the same target. Same rules and same output format." \
-  2>/dev/null >/dev/null
+  </dev/null 2>/dev/null >/dev/null
 ```
 
 **Each round, after the critic returns:**
