@@ -12,6 +12,7 @@ import contextlib
 
 import pytest
 
+from agentlatch import AgentLatch
 from agentlatch.engine import DeliveryEngine
 from agentlatch.memory import SessionLocks
 from agentlatch.schemas import ResponsePayload
@@ -202,3 +203,78 @@ async def test_direct_construction_rejects_sync_injector(redis_client, tank, clo
 
     with pytest.raises(AssertionError):
         make_engine(redis_client, tank, clock, injector=SyncDuck())
+
+
+# --- T9: facade round-trip — AgentLatch wires the injector + shares the lock ---
+
+
+async def _facade_seed_and_wait(latch, clock, payload):
+    """Enqueue, mark speech at t0, then advance the clock past the threshold."""
+    await latch.enqueue(payload)
+    await latch.get_next_message(payload.session_id, is_user_speaking=True)
+    clock.advance(2.0)
+
+
+async def test_facade_injects_then_returns(redis_client, clock):
+    injector = FakeInjector()
+    latch = AgentLatch(redis_client=redis_client, now=clock, context_injector=injector)
+    payload = ResponsePayload(
+        session_id="s1",
+        text_to_speak="order shipped",
+        silent_context_update={"order": "shipped"},
+    )
+    await _facade_seed_and_wait(latch, clock, payload)
+
+    # The payload surfaces only after the injector has run (strict before-return
+    # gating is proven at the engine in T8; here we prove the facade wires it).
+    assert await latch.get_next_message("s1", is_user_speaking=False) == payload
+    assert injector.calls == [("s1", {"order": "shipped"})]
+
+
+async def test_facade_no_injector_returns_uninjected(redis_client, clock):
+    # Slice 2 behavior intact: with no context_injector the payload returns as-is.
+    latch = AgentLatch(redis_client=redis_client, now=clock)
+    payload = ResponsePayload(
+        session_id="s1", text_to_speak="hi", silent_context_update={"k": "v"}
+    )
+    await _facade_seed_and_wait(latch, clock, payload)
+
+    assert await latch.get_next_message("s1", is_user_speaking=False) == payload
+
+
+async def test_memory_lock_is_the_lock_injection_acquires(redis_client, clock):
+    # The developer's read-lock (memory_lock) must be the SAME object the
+    # injection acquires — otherwise SPEC §3.3's read/write mutual exclusion is a
+    # no-op. The facade owns the registry, so point the spy at it to capture the
+    # exact lock held during the call; the strong ref keeps the weak entry alive.
+    injector = FakeInjector()
+    latch = AgentLatch(redis_client=redis_client, now=clock, context_injector=injector)
+    injector._locks = latch._locks  # observe the facade's shared registry
+    payload = ResponsePayload(
+        session_id="s1", text_to_speak="hi", silent_context_update={"k": "v"}
+    )
+    await _facade_seed_and_wait(latch, clock, payload)
+
+    assert await latch.get_next_message("s1", is_user_speaking=False) == payload
+    assert injector.lock_held_during_call is True
+    assert injector.captured_lock is not None
+    # normalized id ⇒ memory_lock returns the very object the injection held
+    assert latch.memory_lock(" s1 ") is injector.captured_lock
+
+
+async def test_documented_safe_order_round_trips(redis_client, clock):
+    # The contract: read under memory_lock, RELEASE, then poll. Proven here; the
+    # deadlock from holding it across get_next_message is documented, not tested,
+    # because it would hang (non-reentrant asyncio.Lock — plan §4.9).
+    injector = FakeInjector()
+    latch = AgentLatch(redis_client=redis_client, now=clock, context_injector=injector)
+    payload = ResponsePayload(
+        session_id="s1", text_to_speak="hi", silent_context_update={"k": "v"}
+    )
+    await _facade_seed_and_wait(latch, clock, payload)
+
+    async with latch.memory_lock("s1"):
+        pass  # a developer would read LLM memory here, then release before polling
+
+    assert await latch.get_next_message("s1", is_user_speaking=False) == payload
+    assert injector.calls == [("s1", {"k": "v"})]  # injection ran fine after release
