@@ -8,6 +8,7 @@ the injected ``clock`` fixture; never ``asyncio.sleep``.
 """
 
 import asyncio
+import contextlib
 
 import pytest
 
@@ -37,7 +38,8 @@ async def _seed_and_wait(engine, tank, clock, payload):
 
 
 async def test_payload_not_returned_until_injection_completes(redis_client, tank, clock):
-    # Gated: the payload must not surface until inject_context has finished.
+    # Gated: the payload must not surface until inject_context has finished, and
+    # the lock stays held for the *whole* injection (not just at entry).
     gate = asyncio.Event()
     locks = SessionLocks()
     injector = FakeInjector(locks=locks, gate=gate)
@@ -46,12 +48,20 @@ async def test_payload_not_returned_until_injection_completes(redis_client, tank
     await _seed_and_wait(engine, tank, clock, payload)
 
     task = asyncio.create_task(engine.get_next_message("s1", is_user_speaking=False))
-    await asyncio.wait_for(injector.entered.wait(), 1.0)  # injection has started…
+    try:
+        await asyncio.wait_for(injector.entered.wait(), 1.0)  # injection has started…
+        assert not task.done()  # …and the payload is NOT returned while it blocks
+        assert injector.captured_lock is not None
+        assert injector.captured_lock.locked() is True  # lock held while suspended
+        gate.set()
+        assert await task == payload
+    finally:
+        gate.set()  # never leave the task dangling, even if an assert failed
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
-    assert not task.done()  # …and the payload is NOT returned while it blocks
-
-    gate.set()
-    assert await task == payload
+    assert injector.captured_lock.locked() is False  # released after completion
     assert injector.calls == [("s1", {"k": "v"})]
 
 
@@ -119,6 +129,20 @@ async def test_no_injection_or_lock_without_context(redis_client, tank, clock):
     assert await engine.get_next_message("s1", is_user_speaking=False) == payload
     assert injector.calls == []  # not injected
     assert locks.get_calls == []  # …and no lock was ever acquired
+
+
+async def test_no_injection_or_lock_on_empty_queue(redis_client, tank, clock):
+    # Injector configured, silence is sufficient, but the queue is empty: returns
+    # None and never touches the injector or the lock.
+    locks = SpyLocks()
+    injector = FakeInjector(locks=locks)
+    engine = make_engine(redis_client, tank, clock, injector=injector, locks=locks)
+    await engine.get_next_message("s1", is_user_speaking=True)  # baseline, empty queue
+    clock.advance(2.0)
+
+    assert await engine.get_next_message("s1", is_user_speaking=False) is None
+    assert injector.calls == []  # nothing popped ⇒ nothing injected
+    assert locks.get_calls == []  # …and no lock acquired
 
 
 async def test_no_injection_or_lock_when_injector_is_none(redis_client, tank, clock):
