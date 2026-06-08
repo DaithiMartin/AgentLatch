@@ -145,5 +145,6 @@ irreversible/outward action beyond the expected PR.**
 No open decisions remain for Slice 1.
 
 ## 6. Next step
-**Slice 1 is complete.** Next is a `/plan` pass to break **Slice 2 (the Delivery
-Engine)** into tasks. Live status in [`todo.md`](./todo.md).
+**Slice 1 is complete.** Next is a `/slice-plan` pass to break **Slice 2 (the
+Delivery Engine)** into tasks — it cross-checks the plan with a second model
+before human sign-off. Live status in [`todo.md`](./todo.md).

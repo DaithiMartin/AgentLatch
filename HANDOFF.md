@@ -10,7 +10,7 @@ Durable state for resuming work. Pointers, not duplicates:
 
 **Slice 1 (Receiver + Holding Tank) is COMPLETE** — T0–T4 merged, CP-A & CP-B
 approved. The library + HTTP ingest path is built, tested, and verified against a
-real Redis (live smoke). **Next: `/plan` Slice 2 (the Delivery Engine).**
+real Redis (live smoke). **Next: `/slice-plan` Slice 2 (the Delivery Engine).**
 Per-task status in `tasks/todo.md`.
 
 ## What exists

@@ -35,8 +35,15 @@ user's **explicit approval**. Keeping these accurate is what lets a resuming ses
   file, a confirmed library call). Gather missing inputs now. If something's missing, **ask — don't guess.**
 - **Remote check (first run):** the PR step needs a GitHub remote. If `git remote -v` is empty, surface it
   and ask the user to add one (`git remote add origin …`) or confirm a fallback before you start building.
-- **The gate — present, then wait.** Show: (a) the task + dependency/inputs check, (b) your build plan, and
-  (c) any **deviation** from the task as written or a decision needing input, each with rationale.
+- **Cross-check high-stakes plans (second model).** If the task is high-stakes — security, auth,
+  concurrency, the no-`sleep` timing path, the Redis key schema, migrations, a public-API change, or
+  anything irreversible (the same trigger as `agent-skills:doubt-driven-development`) — run
+  **`cross-check mode=plan`** on your build plan first and fold any surviving **BLOCKER/MAJOR**
+  findings in. Carry its verdict + `reviewed with: <model>` line into the gate. Skip it for
+  cheap/obvious tasks.
+- **The gate — present, then wait.** Show: (a) the task + dependency/inputs check, (b) your build
+  plan (incorporating any cross-check changes), and (c) any **deviation** from the task as written or
+  a decision needing input, each with rationale.
   **Then wait for the user's go-ahead before writing code.**  ← *supervised gate*
 
 ## 1. Orient (read-only, in order)
@@ -81,17 +88,24 @@ read: **don't leak your intended solution or conclusions — but DO give it the 
 
 > "Task `<TX>` is committed on branch `<branch>`. Verify it against its entry in `tasks/todo.md` (`<TX>`):
 > run that task's **Verify** block (`uv run pytest …` + any manual check), do a five-axis review
-> (correctness, readability, architecture, security, performance), and confirm the SPEC §7 Boundaries hold
-> (especially: the seams stayed isolated — only `app/llm.py` is the LLM mock point). Return a verdict:
-> **pass**, or **fail** with specific findings."
+> (correctness, readability, architecture, security, performance), and confirm the SPEC §9 Boundaries hold
+> (especially the seams: no `asyncio.sleep` to measure silence — timestamp diffing only; real
+> `redis.asyncio`, never a Python `dict`; the clock stayed an injectable callable; `fastapi` stayed an
+> optional extra, never a hard core dep). Return a verdict: **pass**, or **fail** with specific findings."
 
 **For infra / packaging tasks** (e.g. the Dockerfile) the Verify block may not be fully runnable cold or
 pre-merge. Tell the agent what's checkable **now** (a local `docker build`, inspecting produced artifacts)
 and record in the PR what only completes **after merge**. Don't have it re-run a push/deploy.
 
-- **Pass** → step 6.
+**Cross-model pass (defense in depth).** Alongside the independent Claude reviewer, run
+**`cross-check mode=diff`** on the branch diff — a *different model family* catches what cross-context
+alone can't (cross-MODEL ≠ cross-context). Default-on for high-stakes tasks; opt-in for routine ones
+(the Claude reviewer is always-on). Put **both** verdicts — each with its `reviewed with: <model>` line —
+in the PR body. A BLOCKER/MAJOR from *either* reviewer is a fail.
+
+- **Pass** (both reviewers clear) → step 6.
 - **Fail** → fix the **root cause** yourself (never skip or delete a failing test), re-commit, re-run the
-  verify agent. Bounded: after ~2 failed rounds, **stop and surface** to the user.
+  reviewer(s) that failed. Bounded: after ~2 failed rounds, **stop and surface** to the user.
 
 ## 6. PR
 `git push -u origin <branch>`, then `gh pr create`. Put the verify agent's verdict in the body, plus any
