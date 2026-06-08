@@ -32,8 +32,17 @@ class ContextInjector(abc.ABC):
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        impl = cls.__dict__.get("inject_context")
-        if impl is not None and not inspect.iscoroutinefunction(impl):
+        # Resolve via the MRO, not cls.__dict__: a sync/non-callable
+        # inject_context inherited from a mixin (e.g.
+        # ``class Bad(SyncMixin, ContextInjector)``) is absent from cls.__dict__
+        # yet is exactly what AgentLatch would ``await`` — so a __dict__-only
+        # check leaves an instantiable ContextInjector with a non-coroutine
+        # method, defeating the guarantee the facade relies on. The base method
+        # is itself an ``async def`` (a coroutine function even while abstract),
+        # so an intermediate subclass that hasn't overridden it still passes and
+        # stays un-instantiable via abc; only a concrete override is constrained.
+        impl = getattr(cls, "inject_context", None)
+        if not inspect.iscoroutinefunction(impl):
             raise TypeError(
                 f"{cls.__name__}.inject_context must be defined with 'async def'"
             )
