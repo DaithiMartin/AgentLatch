@@ -48,11 +48,10 @@ user's **explicit approval**. Keeping these accurate is what lets a resuming ses
 
 ## 1. Orient (read-only, in order)
 1. `SPEC.md` — source of truth; honor its **Boundaries** (Always / Ask-first / Never).
-2. `docs/intent/all-father.md` — the *why*, when a decision needs grounding in intent.
-3. `tasks/plan.md` — the **phase** this task belongs to and its checkpoint.
-4. The task's **entry in `tasks/todo.md`** — its **Acceptance**, **Verify** steps, **Depends on**, and **Do** scope.
-5. Any **ADRs** it cites and the **code** it touches.
-6. `HANDOFF.md` — current durable project state (what exists, what's decided).
+2. `tasks/plan.md` — the **phase** this task belongs to and its checkpoint.
+3. The task's **entry in `tasks/todo.md`** — its **Acceptance**, **Verify** steps, **Depends on**, and **Do** scope.
+4. Any **ADRs** it cites and the **code** it touches.
+5. `HANDOFF.md` — current durable project state (what exists, what's decided).
 
 ## 2. Branch
 Branch off `main` with a descriptive name drawn from the task — e.g. `feat/scaffold`,
