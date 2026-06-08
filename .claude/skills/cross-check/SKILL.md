@@ -69,7 +69,7 @@ critique find *our* bugs, not textbook ones. Include:
 - **Intent / the "why" — so the critic argues *with* the settled rationale, not against it.** Give
   it what is already decided and why: the project's objective and **scope discipline** (**SPEC §1–§2**
   — the primary directive and the *Resolved design decisions* table), any carried-forward obligations
-  in **`HANDOFF.md`**, and the rationale of any **ADRs** (`docs/adr/`) the work cites. Summarize the
+  (deferral notes in **`SPEC.md`**), and the rationale of any **ADRs** (`docs/adr/`) the work cites. Summarize the
   settled decisions so the critic does not burn rounds re-litigating intent that is already
   reasoned-through (e.g. "this is deliberately single-loop / boring-solution by design"). **But do NOT
   paste your private reasoning or this conversation** — the value of a cross-*model* check is an

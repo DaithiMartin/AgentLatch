@@ -27,12 +27,13 @@ A fact is "stale-prone" only when it appears **outside** its home. Homes for thi
 | Architecture, slice DAG, risks | `docs/PLAN.md` |
 | Per-task detail (acceptance criteria, verify steps) | `tasks/slice-N-*.md` |
 | Task status (done / in-progress) | `tasks/todo.md` (single status tracker) |
-| Current position, project state, infra facts (SAs, buckets, URLs), git state | `HANDOFF.md` |
+| Current position / live status / git state | `tasks/todo.md` + `git`/PRs (no HANDOFF digest) |
+| Infra facts (keys, hooks, URLs) | their owner — `SPEC.md` (key schema/seams), `CONTRIBUTING.md` (hooks), `git` (remote) |
 | Per-task implementation procedure | the session prompt |
 | Durable conventions + pointers (must carry **no** volatile state) | `CLAUDE.md`, `README.md`, dir `README.md`s |
 
-A doc carrying its *own* state is fine (that's its job): `todo.md` checkboxes, `HANDOFF.md`'s current
-position, the `docs/adr/README.md` index. The bug is a *different* doc restating it.
+A doc carrying its *own* state is fine (that's its job): `todo.md` checkboxes and the
+`docs/adr/README.md` index. The bug is a *different* doc restating it.
 
 ## Volatile-fact checklist (scan every doc for these)
 
@@ -41,9 +42,9 @@ Flag any of these when they appear outside their home above:
 1. **Batch/slice/task currency** — "currently/now implementing Batch N", "Current batch: …", "we are on Slice N".
 2. **Counts & ranges that grow** — ADR ranges (`ADR-0001 … ADR-000N`), PR numbers/ranges (`PRs #1–#N`), file/task/box counts ("38 boxes").
 3. **Status words / checkboxes** outside `tasks/todo.md` (per-card status banners are OK).
-4. **Dates / "last updated" stamps** — except `HANDOFF.md`, where currency is the point.
+4. **Dates / "last updated" stamps** restated in otherwise-stable docs.
 5. **Decisions superseded by a later ADR** — wording that still states the pre-decision choice (e.g. a doc citing "Cloud CDN" after ADR-0009/0010 dropped it).
-6. **Hardcoded values that live in code/config** — SA emails, bucket names, project IDs, service URLs — restated outside `HANDOFF.md`/`infra/`.
+6. **Hardcoded values that live in code/config** — SA emails, bucket names, project IDs, service URLs — restated outside `SPEC.md`/config/`infra/`.
 
 ## Process
 
@@ -64,7 +65,7 @@ Flag any of these when they appear outside their home above:
 
 | File:line | Stale content | Owned by | Suggested fix |
 |-----------|---------------|----------|---------------|
-| README.md:56 | "Currently implementing Batch 1" | HANDOFF/todo | defer to HANDOFF.md + tasks/todo.md |
+| README.md:56 | "Currently implementing Batch 1" | tasks/todo.md | defer to `tasks/todo.md` (the status tracker) |
 | SPEC.md:80 | "GCS bucket + Cloud CDN" | ADR-0009 | "Cloud Run static (ADR-0009)" |
 
 Clean: <docs with no findings>
@@ -72,7 +73,7 @@ Clean: <docs with no findings>
 
 ## What is NOT a finding
 
-- A doc carrying the state it *owns* (todo.md status, HANDOFF current position/facts, the ADR index).
+- A doc carrying the state it *owns* (todo.md status/checkboxes, the ADR index).
 - **Durable** facts digested into a pointer doc (the five slices, the tech choices, the Glossary) — stable, not volatile.
 - Forward-looking plans that name future ADRs/tasks that don't exist yet (that's intent, not drift).
 

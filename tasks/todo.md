@@ -4,8 +4,7 @@ Status tracker for the `dev-loop`. Architecture, DAG, and design notes live in
 [`plan.md`](./plan.md); intent + boundaries in [`SPEC.md`](../SPEC.md).
 
 > **Slices 1 & 2 ✅ COMPLETE** — T0–T6 merged, CP-A/CP-B/CP-C approved (PRs #1–#9); the
-> ingest **and** delivery paths are built and live-smoke-verified. Full history in git +
-> [`HANDOFF.md`](../HANDOFF.md).
+> ingest **and** delivery paths are built and live-smoke-verified. Full history in git.
 > **This slice (3)** injects silent context into the live LLM's memory **before** a held
 > message is spoken. Plan signed off 2026-06-08; **T7 merged** (PR #10); **next: T8** —
 > per-task status below.

@@ -34,8 +34,10 @@ with an explicit `cross-check` gate added at the end of planning.)*
 ### 1. Orient
 - `SPEC.md` — source of truth. Read **§9 Boundaries** (Always / Ask-first / Never), **§10 execution
   plan** (which slice this is, its checkpoint), and the relevant architecture (§3) + public API (§4).
-- `tasks/plan.md` + `tasks/todo.md` — what prior slices built and how tasks are written here.
-- `HANDOFF.md` — durable state and any carried-forward obligations (e.g. deferred params).
+- `tasks/plan.md` + `tasks/todo.md` — how tasks are written here; `todo.md` checkboxes + `git`/PRs for
+  what prior slices already built.
+- **Carried-forward obligations** (deferred params, "TO ADD in Slice N" notes) — read them from `SPEC.md`,
+  the durable home (the per-slice `plan.md` is rewritten each slice, so deferrals live in SPEC, not a status doc).
 - The code the slice will touch and any ADRs (`docs/adr/`) it depends on.
 
 **Do NOT write code.** The output is a plan.

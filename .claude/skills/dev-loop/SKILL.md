@@ -3,7 +3,7 @@ name: dev-loop
 description: >-
   Execute exactly ONE task from tasks/todo.md, end-to-end and supervised: orient against SPEC.md and
   tasks/plan.md, branch, build with TDD, simplify, verify in an INDEPENDENT sub-agent (reviewer ≠ author),
-  open a GitHub PR, then update the tracker + HANDOFF.md and STOP at the next task or checkpoint. Use this
+  open a GitHub PR, then update the tracker and STOP at the next task or checkpoint. Use this
   whenever the user wants to advance the build — "do the next task", "run the loop", "start T3", "continue
   the build", "work the todo list", "pick up the next task" — even if they don't say "dev-loop". Any request
   to pick up and ship the next planned unit of work from tasks/todo.md should trigger this skill. Do NOT use
@@ -14,7 +14,7 @@ description: >-
 
 A linear, **supervised** build loop: you build it yourself, but **Verify runs in an independent sub-agent
 that didn't write the code** — reviewer ≠ author, so the review is genuinely cold. One task per run, then
-stop. The point of the structure is to keep the tracker and `HANDOFF.md` honest, gate irreversible/outward
+stop. The point of the structure is to keep the tracker (`tasks/todo.md`) honest, gate irreversible/outward
 actions, and make verification fit infra/CI/data tasks, not just unit-test-shaped ones.
 
 *(Adapted from the "Ralph v4" workflow. This repo uses a single `tasks/plan.md` + single `tasks/todo.md`,
@@ -52,8 +52,9 @@ user's **explicit approval**. Keeping these accurate is what lets a resuming ses
 1. `SPEC.md` — source of truth; honor its **Boundaries** (Always / Ask-first / Never).
 2. `tasks/plan.md` — the **phase** this task belongs to and its checkpoint.
 3. The task's **entry in `tasks/todo.md`** — its **Acceptance**, **Verify** steps, **Depends on**, and **Do** scope.
-4. Any **ADRs** it cites and the **code** it touches.
-5. `HANDOFF.md` — current durable project state (what exists, what's decided).
+4. Any **ADRs** it cites and the **code** it touches — the code plus the merged items in `tasks/todo.md`
+   are "what exists"; `SPEC.md` (§2 decisions, §9 boundaries) is "what's decided". (No `HANDOFF.md` —
+   orient from these sources of truth, not a hand-maintained digest.)
 
 ## 2. Branch
 Branch off `main` with a descriptive name drawn from the task — e.g. `feat/scaffold`,
@@ -120,23 +121,25 @@ in the PR body. A BLOCKER/MAJOR from *either* reviewer is a fail.
 post-merge checks still pending. Do **not** merge it yourself — the human merges (`gh pr merge` is denied
 in `.claude/settings.json`). Hand-off-and-stop happens after step 7.
 
-## 7. Mark progress → doc-freshness → stop
+## 7. Mark progress → stop
 - `tasks/todo.md`: set the task to **`[~]` + PR link** (not `[x]` — that's on merge; the next task's start
   flips it). Tick the **Acceptance** items this PR satisfies; leave any that only complete post-merge, and say so.
-- **Update `HANDOFF.md`** if the task changed durable state — a working endpoint, the memory format on disk,
-  a settled decision. Keep HANDOFF a *pointer to durable facts* (defer live status to `todo.md`). Skipping
-  this is what makes a resuming session start stale.
-- **Run the `doc-freshness` skill** over the stateful markdown (`HANDOFF.md`, `CLAUDE.md`, `README.md`,
-  `SPEC.md`, `docs/`, `tasks/`). It flags docs that now hard-code a fact owned elsewhere instead of pointing
-  to its source — the silent-staleness trap. Apply its fixes. This is the end-of-loop honesty check on our
-  stateful artifacts.
+- **A durable change goes in its source-of-truth doc, never a status mirror:** a settled decision or a
+  new/changed seam → `SPEC.md` (Ask-first); the slice's architecture → `tasks/plan.md`; a **cross-slice
+  deferral** → `SPEC.md` (it survives the per-slice `plan.md` rewrite — a status doc would not). `todo.md`
+  owns live status; there is no separate HANDOFF to keep in sync, so a resuming session orients from these
+  sources of truth (which can't drift), not a digest.
 - Commit the tracker/doc updates (via `commit-message`) and push. Then **hand off the PR link and stop** —
-  the user merges.
+  the user merges. (Doc-freshness now runs per *slice* at the `CP-*` checkpoint, not per task.)
 
 ## Checkpoints (human gates)
 Never implement a Checkpoint as a task. When the topmost item is a `CP-*`: gather its evidence — it may
 require the prior PR to **merge** first (e.g. green CI, a live round-trip) — **present it**, await the
 user's **explicit approval**, then mark it `[x]`. Then continue to the next task.
+
+**Doc-freshness (run at each `CP-*`).** The doc-freshness audit is now batched here, not per task: run the
+**`doc-freshness`** skill over the stateful markdown (`SPEC.md`, `README.md`, `CONTRIBUTING.md`, `docs/`,
+`tasks/`) and apply its fixes. Per-task doc drift is small; the checkpoint is the cheaper, honest cadence.
 
 **Slice-completion test audit (run at each `CP-*`).** Because the loop has no per-task plan review, every
 slice-closing checkpoint runs a dedicated **integration + mutation audit** over the slice's *whole* test

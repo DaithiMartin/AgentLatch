@@ -324,4 +324,4 @@ manual Interruption Test.
 Each slice is broken into ordered, acceptance-tested tasks with `/slice-plan` when
 it is reached (the repo-local planner — it cross-checks the plan with a second
 model before human sign-off); current position and the next step live in
-[`tasks/todo.md`](./tasks/todo.md) and [`HANDOFF.md`](./HANDOFF.md).
+[`tasks/todo.md`](./tasks/todo.md) (the live status tracker).

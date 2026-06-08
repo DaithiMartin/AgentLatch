@@ -7,7 +7,7 @@
 > [`dev-loop`](../.claude/skills/dev-loop/SKILL.md) skill — not restated here.
 >
 > **Previous:** Slice 1 (Receiver + Holding Tank, PRs #1–#5) and Slice 2 (Delivery
-> Engine, PRs #8–#9, CP-C approved) — COMPLETE. See [`HANDOFF.md`](../HANDOFF.md).
+> Engine, PRs #8–#9, CP-C approved) — COMPLETE. Status in [`todo.md`](./todo.md); git for history.
 
 **Created:** 2026-06-08 · **Status:** drafted — cross-checked (see §7), pending human sign-off
 
