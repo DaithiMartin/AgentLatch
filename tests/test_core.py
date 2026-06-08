@@ -4,12 +4,18 @@ DAMP: each construction / validation / enqueue case is explicit. fakeredis
 backs the storage (no live Redis).
 """
 
+import math
+
 import pytest
 from redis.asyncio import Redis
 
 import agentlatch
 from agentlatch import AgentLatch, ResponsePayload
+from agentlatch.core import _default_now
 from agentlatch.queue import HoldingTank
+
+NAN = float("nan")
+INF = float("inf")
 
 
 async def test_enqueue_persists_payload(redis_client: Redis) -> None:
@@ -48,6 +54,60 @@ async def test_rejects_non_positive_session_ttl(redis_client: Redis) -> None:
         AgentLatch(redis_client=redis_client, session_ttl=0)
     with pytest.raises(ValueError):
         AgentLatch(redis_client=redis_client, session_ttl=-1)
+
+
+# bool is an int/float subclass and a NaN threshold makes `silence < threshold`
+# always False (pops immediately) — both must be rejected as non-finite/non-real.
+# A huge int overflows the float conversion and must reject cleanly (ValueError),
+# not leak OverflowError.
+@pytest.mark.parametrize("bad", [True, False, NAN, INF, 10**1000])
+async def test_rejects_non_finite_silence_threshold(redis_client: Redis, bad) -> None:
+    with pytest.raises(ValueError):
+        AgentLatch(redis_client=redis_client, silence_threshold=bad)
+
+
+# session_ttl must be a strict positive non-bool int: a float that looks
+# integer-valued (1.0) is still wrong, as is 1.5/NaN/inf and bool.
+@pytest.mark.parametrize("bad", [True, False, 1.0, 1.5, NAN, INF])
+async def test_rejects_non_int_session_ttl(redis_client: Redis, bad) -> None:
+    with pytest.raises(ValueError):
+        AgentLatch(redis_client=redis_client, session_ttl=bad)
+
+
+# A misbehaving injected clock must be caught at construction, mirroring the
+# engine's finite-on-read rule (bool/NaN/inf/non-number are all invalid).
+@pytest.mark.parametrize(
+    "bad_now",
+    [
+        lambda: True,  # math.isfinite(True) is True, but a bool is not a clock
+        lambda: NAN,
+        lambda: INF,
+        lambda: "now",  # non-number
+        lambda: 10**1000,  # overflows float conversion — reject, don't leak
+    ],
+)
+async def test_rejects_invalid_now_callable(redis_client: Redis, bad_now) -> None:
+    with pytest.raises(ValueError):
+        AgentLatch(redis_client=redis_client, now=bad_now)
+
+
+async def test_rejects_non_callable_now(redis_client: Redis) -> None:
+    with pytest.raises(ValueError):
+        AgentLatch(redis_client=redis_client, now=42)  # type: ignore[arg-type]
+
+
+async def test_default_now_is_the_utc_wall_clock(redis_client: Redis) -> None:
+    # No `now` provided => the facade uses the default UTC wall clock, which must
+    # yield a finite epoch timestamp.
+    latch = AgentLatch(redis_client=redis_client)
+    assert latch._now is _default_now
+    assert math.isfinite(_default_now())
+
+
+async def test_accepts_int_silence_threshold(redis_client: Redis) -> None:
+    # An int threshold is a valid finite-positive number, stored as a float.
+    latch = AgentLatch(redis_client=redis_client, silence_threshold=3)
+    assert latch.silence_threshold == 3.0
 
 
 async def test_redis_url_constructs_lazily() -> None:

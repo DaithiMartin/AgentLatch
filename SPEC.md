@@ -118,6 +118,21 @@ an idle flag.
   has `silent_context_update`, run the injector under the lock, then return it.
 - **State key:** `agentlatch:last_speech:{session_id}` in Redis, so timing is
 stateless and works across workers.
+- **Concurrency contract (normative):** a given `session_id` **must** have at most
+**one active poll loop at a time** (one real-time voice stream ⇒ one poll loop).
+**Any** concurrent same-session polling — speaking or silent — is unsupported in
+v1: a second poller could `LPOP` a message another already gated, or write
+`last_speech` between a poll's silence check and its `LPOP`, releasing a message
+into fresh speech. The silence check and the `LPOP` are intentionally **not**
+atomic and AgentLatch ships **no** per-session *delivery* lock (distinct from the
+§3.3 injector idle-lock, which guards memory mutation, not polling) — serializing
+pollers would drift toward message-broker scope (§1) and away from the boring
+solution (§6).
+Sequential handoff (a session moving to another worker **after** its previous loop
+stops — never concurrently) is permitted, **subject to the wall-clock caveat
+below**: across-process timing is skew-safe only insofar as the workers' clocks
+agree; Redis-server-time as the canonical clock is the noted future hardening.
+Revisit only if multi-loop-per-session enters scope.
 - **CRITICAL CONSTRAINT — the state trap:** **never** `asyncio.sleep()` to measure
 silence; it blocks the audio event loop. Use timestamp diffing only.
 - **Clock seam:** the "now" source is an **injectable callable** (defaults to UTC

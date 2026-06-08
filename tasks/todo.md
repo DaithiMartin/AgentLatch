@@ -5,7 +5,8 @@ Status tracker for the `dev-loop`. Architecture, DAG, and design notes live in
 
 > **Slice 1 ✅ COMPLETE** — T0–T4 merged, CP-A/CP-B approved (PRs #1–#5); the ingest path
 > is built and verified. Full history in git + [`HANDOFF.md`](../HANDOFF.md).
-> **This slice (2)** builds the delivery path. Next after sign-off: `dev-loop` picks up **T5**.
+> **This slice (2)** builds the delivery path — T5 merged, T6 in review; **next: CP-C**
+> (the Slice 2 human gate). Per-task status below.
 
 **Status legend:** `[ ]` pending · `[~]` PR open (link) · `[x]` merged.
 A task flips to `[x]` only on **merge** (the next task's start flips it).
@@ -13,7 +14,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
 
 ---
 
-### T5 — `engine.py` · `DeliveryEngine`  `[~]` — [PR #8](https://github.com/DaithiMartin/AgentLatch/pull/8)
+### T5 — `engine.py` · `DeliveryEngine`  `[x]` — [PR #8](https://github.com/DaithiMartin/AgentLatch/pull/8) (merged)
 - **Depends on:** T2 (HoldingTank) — merged.
 - **Do:** `DeliveryEngine(redis, tank, *, silence_threshold, session_ttl, now)`; key
   `agentlatch:last_speech:{session_id}`. `get_next_message(session_id, is_user_speaking)`:
@@ -39,8 +40,8 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   - [x] No `asyncio.sleep` anywhere in `engine.py` or its tests (timestamp diffing only).
 - **Verify:** `uv run pytest tests/test_engine.py && uv run ruff check . && uv run mypy src`
 
-### T6 — `core.py` · wire `get_next_message` into the facade  `[ ]`
-- **Depends on:** T5.
+### T6 — `core.py` · wire `get_next_message` into the facade  `[~]` — [PR #9](https://github.com/DaithiMartin/AgentLatch/pull/9)
+- **Depends on:** T5 — merged.
 - **Do:** `AgentLatch.get_next_message(session_id, is_user_speaking)` — validate with Pydantic
   (SPEC §9): `is_user_speaking` via a `StrictBool` `TypeAdapter` (`ValidationError`, no coercion),
   `session_id` normalized via the same `NonEmptyStr` `schemas.py` uses (shared `TypeAdapter`) so
@@ -50,18 +51,19 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   keyword-only `now: Callable[[], float] | None = None` (default UTC wall clock; if provided, validate
   callable + finite) and construct `self._engine`. **`now` on the constructor needs gate sign-off
   (SPEC §9 Ask-first).** Extend `tests/test_core.py` (or add `tests/test_delivery.py`).
-- **Acceptance:**
-  - [ ] Round-trip with an injected clock: `enqueue` → `None` while speaking / `silence < 2.0s` →
+- **Acceptance:** (all met — 84-test suite + ruff + mypy green; independent Claude reviewer **APPROVE**
+  + Codex `cross-check mode=diff` **0 BLOCKER/0 MAJOR**)
+  - [x] Round-trip with an injected clock: `enqueue` → `None` while speaking / `silence < 2.0s` →
         `ResponsePayload` once `silence ≥ 2.0s`; FIFO across two deliveries.
-  - [ ] Non-`bool` `is_user_speaking` (e.g. `1`, `"true"`, `None`) → `ValidationError` (StrictBool,
+  - [x] Non-`bool` `is_user_speaking` (e.g. `1`, `"true"`, `None`) → `ValidationError` (StrictBool,
         no coercion); empty/blank `session_id` → raises.
-  - [ ] `enqueue(ResponsePayload(session_id="s1", …))` then `get_next_message(" s1 ", …)` resolve to
-        the **same** key and the message is delivered (normalization).
-  - [ ] `silence_threshold` ∈ {`True`, `NaN`, `inf`, `0`, `-1`} → `ValueError`; `session_ttl` ∈
-        {`True`, `False`, `1.5`, `NaN`, `inf`, `0`, `-1`} → `ValueError` (strict finite-positive non-bool).
-  - [ ] The single-loop-per-session contract is stated in the `get_next_message` docstring (normative;
+  - [x] `enqueue(ResponsePayload(session_id="s1", …))` then `get_next_message(" s1 ", …)` resolve to
+        the **same** key and the message is delivered (normalization — proven structurally + by test).
+  - [x] `silence_threshold` ∈ {`True`, `NaN`, `inf`, `0`, `-1`, huge-int} → `ValueError`; `session_ttl` ∈
+        {`True`, `False`, `1.0`, `1.5`, `NaN`, `inf`, `0`, `-1`} → `ValueError` (strict finite-positive non-bool).
+  - [x] The single-loop-per-session contract is stated in the `get_next_message` docstring (normative;
         SPEC §3.4) — no lock.
-  - [ ] Default construction (no `now`) uses a UTC wall clock; public exports unchanged.
+  - [x] Default construction (no `now`) uses a UTC wall clock; public exports unchanged.
 - **Verify:** `uv run pytest && uv run ruff check . && uv run mypy src`
 
 ### CP-C — Slice 2 complete · delivery path proven (human gate)  `[ ]`

@@ -10,10 +10,11 @@ Durable state for resuming work. Pointers, not duplicates:
 
 **Slice 1 COMPLETE** — T0–T4 merged, CP-A & CP-B approved; the library + HTTP
 ingest path is built, tested, and live-smoke-verified. **Slice 2 (Delivery Engine)
-is underway:** planned via `/slice-plan` (cross-checked, see `tasks/plan.md` §7), and
-**T5 (`engine.py`) is in review — [PR #8](https://github.com/DaithiMartin/AgentLatch/pull/8).**
-**Next: T6** (wire `get_next_message` into the facade), then CP-C. Per-task status in
-`tasks/todo.md`.
+is nearly done:** planned via `/slice-plan` (cross-checked, see `tasks/plan.md` §7);
+**T5 (`engine.py`) is merged** ([PR #8](https://github.com/DaithiMartin/AgentLatch/pull/8)),
+and **T6 (wire `get_next_message` into the facade) is in review —
+[PR #9](https://github.com/DaithiMartin/AgentLatch/pull/9).** **Next: CP-C** (Slice 2
+human gate, after T6 merges). Per-task status in `tasks/todo.md`.
 
 ## What exists
 
@@ -25,8 +26,15 @@ is underway:** planned via `/slice-plan` (cross-checked, see `tasks/plan.md` §7
   `extra="forbid"`, non-empty whitespace-stripped strings).
 - `HoldingTank` per-session Redis FIFO queue (`agentlatch.queue`:
   `push`/`pop`/`length`, RPUSH/LPOP, TTL refreshed on write).
+- `DeliveryEngine` VAD-timed release (`agentlatch.engine`, merged T5):
+  records `last_speech` on speech, pops after `silence ≥ threshold` via
+  timestamp diffing on an injectable clock (never `asyncio.sleep`); fails
+  safe on clock skew / corrupt timestamps (reseed + hold, no early pop).
 - `AgentLatch` facade (`agentlatch.core`): `enqueue`, exactly-one Redis source,
   ownership-aware `aclose`; `AgentLatch`/`ResponsePayload` exported at top level.
+  Delivery surface `get_next_message` (strict `StrictBool` + normalized
+  `session_id`, injectable `now` clock seam) lands in T6 — in review,
+  [PR #9](https://github.com/DaithiMartin/AgentLatch/pull/9).
 - Optional FastAPI receiver (`agentlatch.integrations.fastapi.create_router`):
   `POST /api/v1/queue_response` → 202/422, import-guarded behind the extra.
 
@@ -37,7 +45,8 @@ is underway:** planned via `/slice-plan` (cross-checked, see `tasks/plan.md` §7
   `git config core.hooksPath .githooks` (see `CONTRIBUTING.md`).
 - Redis key scheme (owned by SPEC §3.2 / §3.4): `agentlatch:queue:{session_id}`
   (list, live since Slice 1); `agentlatch:last_speech:{session_id}` (Delivery
-  Engine — T5, in review · [PR #8](https://github.com/DaithiMartin/AgentLatch/pull/8)).
+  Engine — live since T5, [PR #8](https://github.com/DaithiMartin/AgentLatch/pull/8),
+  merged).
 
 ## Deferred (carried-forward obligations)
 
