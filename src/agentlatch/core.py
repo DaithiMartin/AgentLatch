@@ -34,11 +34,14 @@ def _default_now() -> float:
 def _is_finite_real(value: object) -> bool:
     # A real, finite number — never a bool (bool is an int subclass) and never
     # NaN/inf. The bool check must precede isfinite, since isfinite(True) is True.
-    return (
-        not isinstance(value, bool)
-        and isinstance(value, (int, float))
-        and math.isfinite(value)
-    )
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        # A huge int (e.g. 10**1000) overflows the float conversion: not a usable
+        # finite value, so reject it cleanly rather than leak OverflowError.
+        return False
 
 
 def _validate_silence_threshold(value: float) -> float:

@@ -124,8 +124,10 @@ stateless and works across workers.
 v1: a second poller could `LPOP` a message another already gated, or write
 `last_speech` between a poll's silence check and its `LPOP`, releasing a message
 into fresh speech. The silence check and the `LPOP` are intentionally **not**
-atomic and AgentLatch ships **no** per-session lock — serializing pollers would
-drift toward message-broker scope (§1) and away from the boring solution (§6).
+atomic and AgentLatch ships **no** per-session *delivery* lock (distinct from the
+§3.3 injector idle-lock, which guards memory mutation, not polling) — serializing
+pollers would drift toward message-broker scope (§1) and away from the boring
+solution (§6).
 Sequential handoff (a session moving to another worker **after** its previous loop
 stops — never concurrently) is permitted, **subject to the wall-clock caveat
 below**: across-process timing is skew-safe only insofar as the workers' clocks

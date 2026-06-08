@@ -58,7 +58,9 @@ async def test_rejects_non_positive_session_ttl(redis_client: Redis) -> None:
 
 # bool is an int/float subclass and a NaN threshold makes `silence < threshold`
 # always False (pops immediately) — both must be rejected as non-finite/non-real.
-@pytest.mark.parametrize("bad", [True, False, NAN, INF])
+# A huge int overflows the float conversion and must reject cleanly (ValueError),
+# not leak OverflowError.
+@pytest.mark.parametrize("bad", [True, False, NAN, INF, 10**1000])
 async def test_rejects_non_finite_silence_threshold(redis_client: Redis, bad) -> None:
     with pytest.raises(ValueError):
         AgentLatch(redis_client=redis_client, silence_threshold=bad)
@@ -81,6 +83,7 @@ async def test_rejects_non_int_session_ttl(redis_client: Redis, bad) -> None:
         lambda: NAN,
         lambda: INF,
         lambda: "now",  # non-number
+        lambda: 10**1000,  # overflows float conversion — reject, don't leak
     ],
 )
 async def test_rejects_invalid_now_callable(redis_client: Redis, bad_now) -> None:
