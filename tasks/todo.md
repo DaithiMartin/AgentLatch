@@ -13,7 +13,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
 
 ---
 
-### T5 — `engine.py` · `DeliveryEngine`  `[ ]`
+### T5 — `engine.py` · `DeliveryEngine`  `[~]` — [PR #8](https://github.com/DaithiMartin/AgentLatch/pull/8)
 - **Depends on:** T2 (HoldingTank) — merged.
 - **Do:** `DeliveryEngine(redis, tank, *, silence_threshold, session_ttl, now)`; key
   `agentlatch:last_speech:{session_id}`. `get_next_message(session_id, is_user_speaking)`:
@@ -23,20 +23,20 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   else `tank.pop()` (`None` if empty).
   `tests/test_engine.py` (DAMP, fakeredis + injected fake clock). Add a fake-clock fixture to
   `tests/conftest.py`.
-- **Acceptance:**
-  - [ ] `is_user_speaking=True` → returns `None` **and** records last_speech (a following silent
-        poll measures from it).
-  - [ ] Not speaking: `silence` at **1.999s → `None`**; at **2.000s → pops**; at **2.001s → pops**
+- **Acceptance:** (all met — 15 DAMP tests; verified by an independent Claude reviewer + Codex `cross-check`)
+  - [x] `is_user_speaking=True` → returns `None` **and** records last_speech (value + bounded TTL).
+  - [x] Not speaking: `silence` at **1.999s → `None`**; at **2.000s → pops**; at **2.001s → pops**
         (boundary is `≥`), with a non-empty queue.
-  - [ ] Sufficient silence but **empty queue → `None`**; **cold start** (no last_speech) + not
+  - [x] Sufficient silence but **empty queue → `None`**; **cold start** (no last_speech) + not
         speaking → **seeds baseline, returns `None`**, then delivers only after ≥2s subsequent
         silence (§4.2).
-  - [ ] **Future last_speech** (negative silence) → **`None`** (skew guard, §4.5).
-  - [ ] An injected clock returning **`NaN`/`inf`** → **raises loudly** (finite-on-read guard).
-  - [ ] **Speech races a due delivery:** `is_user_speaking=True` when silence would otherwise pop →
+  - [x] **Future last_speech** (negative silence) → **`None`** (skew guard, §4.5).
+  - [x] An injected clock returning **`NaN`/`inf`** → **raises loudly** (finite-on-read; speaking + silent).
+  - [x] A **corrupt/non-finite stored last_speech** → fails safe (reseed + hold, no early pop) — cross-check find.
+  - [x] **Speech races a due delivery:** `is_user_speaking=True` when silence would otherwise pop →
         `None`, **no pop**, message stays queued (SPEC §7 DAMP).
-  - [ ] Two silent polls after enqueuing A,B release **A then B** (FIFO).
-  - [ ] No `asyncio.sleep` anywhere in `engine.py` or its tests (timestamp diffing only).
+  - [x] Two silent polls after enqueuing A,B release **A then B** (FIFO).
+  - [x] No `asyncio.sleep` anywhere in `engine.py` or its tests (timestamp diffing only).
 - **Verify:** `uv run pytest tests/test_engine.py && uv run ruff check . && uv run mypy src`
 
 ### T6 — `core.py` · wire `get_next_message` into the facade  `[ ]`
