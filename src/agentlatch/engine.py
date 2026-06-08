@@ -123,17 +123,19 @@ class DeliveryEngine:
             return None
 
         payload = await self._tank.pop(session_id)
-        if (
-            payload is not None
-            and payload.silent_context_update is not None
-            and self._injector is not None
-        ):
-            # Update the live LLM's memory BEFORE the text reaches TTS, under the
-            # per-session lock so it can't race the developer's memory reads
-            # (SPEC §3.3). The lock wraps only this await; on failure the payload
-            # is already popped (at-most-once) and the exception propagates.
-            async with self._locks.get(session_id):
-                await self._injector.inject_context(
-                    session_id, payload.silent_context_update
-                )
+        if payload is not None:
+            await self._maybe_inject(session_id, payload)
         return payload
+
+    async def _maybe_inject(self, session_id: str, payload: ResponsePayload) -> None:
+        """Update the live LLM's memory before the payload reaches TTS (SPEC §3.3).
+
+        Only when the payload carries a ``silent_context_update`` and an injector
+        is configured. The per-session lock guards the call so it can't race the
+        developer's memory reads; it wraps only this await. The payload is already
+        popped, so a failing injector propagates and is not re-queued (at-most-once).
+        """
+        if payload.silent_context_update is None or self._injector is None:
+            return
+        async with self._locks.get(session_id):
+            await self._injector.inject_context(session_id, payload.silent_context_update)
