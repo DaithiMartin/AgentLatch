@@ -35,12 +35,18 @@ user's **explicit approval**. Keeping these accurate is what lets a resuming ses
   file, a confirmed library call). Gather missing inputs now. If something's missing, **ask — don't guess.**
 - **Remote check (first run):** the PR step needs a GitHub remote. If `git remote -v` is empty, surface it
   and ask the user to add one (`git remote add origin …`) or confirm a fallback before you start building.
-- **Cross-check high-stakes plans (second model).** If the task is high-stakes — security, auth,
-  concurrency, the no-`sleep` timing path, the Redis key schema, migrations, a public-API change, or
-  anything irreversible (the same trigger as `agent-skills:doubt-driven-development`) — run
-  **`cross-check mode=plan`** on your build plan first and fold any surviving **BLOCKER/MAJOR**
-  findings in. Carry its verdict + `reviewed with: <model>` line into the gate. Skip it for
-  cheap/obvious tasks.
+- **Cross-check the build plan (second model) — gate on guarantee-subtlety, NOT complexity.** Run
+  **`cross-check mode=plan`** on your build plan when the task carries a guarantee a *green test could
+  pass without actually proving*: sequencing/ordering ("before"/"after"), atomicity/at-most-once,
+  concurrency/locking, identity/aliasing, timing/the no-`sleep` path, the Redis key schema, a
+  public-API change, migrations, or anything irreversible/security-sensitive. **Skip it** when a
+  passing test *is* the proof (e.g. "the ABC can't be instantiated") — raw complexity is a poor proxy
+  (a complex structure whose contract a passing test fully demonstrates needs no plan audit). Task-level
+  `mode=plan` mainly audits **test rigor** (`slice-plan` already audited design at the slice level), so
+  its yield tracks the subtlety of the *guarantee under test*. Make the call as a **one-line
+  self-assessment at the gate** — "subtlety call: run/skip `mode=plan` because <guarantee>" — for the
+  user to confirm. Fold any surviving **BLOCKER/MAJOR** in; carry the verdict + `reviewed with: <model>`
+  line into the gate.
 - **The gate — present, then wait.** Show: (a) the task + dependency/inputs check, (b) your build
   plan (incorporating any cross-check changes), and (c) any **deviation** from the task as written or
   a decision needing input, each with rationale.
@@ -91,6 +97,13 @@ read: **don't leak your intended solution or conclusions — but DO give it the 
 > (especially the seams: no `asyncio.sleep` to measure silence — timestamp diffing only; real
 > `redis.asyncio`, never a Python `dict`; the clock stayed an injectable callable; `fastapi` stayed an
 > optional extra, never a hard core dep). Return a verdict: **pass**, or **fail** with specific findings."
+
+**For subtle tasks** (the same guarantee-subtlety trigger that gates `mode=plan` above — ordering,
+atomicity, concurrency, identity, timing), **ask the reviewer to mutation-test**: mutate the
+implementation to plausible-wrong variants (fire-and-forget instead of await; `truthy` instead of
+`is not None`; lock the wrong region) and confirm a test **fails** for each. This directly measures
+whether the tests have teeth — the highest-signal check on tests for guarantees a green test can pass
+without proving.
 
 **For infra / packaging tasks** (e.g. the Dockerfile) the Verify block may not be fully runnable cold or
 pre-merge. Tell the agent what's checkable **now** (a local `docker build`, inspecting produced artifacts)
