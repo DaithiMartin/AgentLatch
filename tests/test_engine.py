@@ -116,15 +116,18 @@ async def test_nonfinite_clock_raises_on_silent_poll(redis_client, tank, clock):
     assert await tank.length("s1") == 1  # nothing popped
 
 
-async def test_nonfinite_stored_last_speech_holds(redis_client, tank, clock):
-    # A poisoned last_speech value must never trigger an immediate pop.
-    engine = make_engine(redis_client, tank, clock)
+@pytest.mark.parametrize("corrupt", ["nan", "inf", "-inf", "abc"])
+async def test_corrupt_stored_last_speech_holds_and_reseeds(redis_client, tank, clock, corrupt):
+    # A poisoned last_speech value (non-finite or unparseable) must never pop.
+    engine = make_engine(redis_client, tank, clock, ttl=3600)
     await tank.push("s1", ResponsePayload(session_id="s1", text_to_speak="hi"))
-    await redis_client.set(LAST_SPEECH_KEY, "nan")
+    await redis_client.set(LAST_SPEECH_KEY, corrupt)
 
     assert await engine.get_next_message("s1", is_user_speaking=False) is None
     assert await tank.length("s1") == 1  # held, not popped
-    # the corrupt value was reseeded to a finite baseline; later silence delivers
+    # self-heal: reseeded to a finite baseline with a bounded TTL
+    assert await redis_client.get(LAST_SPEECH_KEY) == str(clock()).encode()
+    assert 0 < await redis_client.ttl(LAST_SPEECH_KEY) <= 3600
     clock.advance(2.0)
     assert await engine.get_next_message("s1", is_user_speaking=False) is not None
 
