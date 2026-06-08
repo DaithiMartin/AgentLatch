@@ -158,7 +158,9 @@ round-trip smoke. Then await explicit approval.
 - Does delivery need to refresh the **queue key TTL** on read? (Likely no — set-on-write suffices.)
 
 ## 6. Next step
-After sign-off, `dev-loop` picks up **T5** (the topmost unchecked task) in `todo.md`.
+`dev-loop` always picks up the topmost unchecked, dependency-ready task in
+[`todo.md`](./todo.md) — the live status tracker. (This file owns the architecture,
+not the cursor.)
 
 ## 7. Cross-check record
 Reviewed with **gpt-5.5** (effort=high) via `cross-check mode=plan`. **Verdict: CONVERGED in 3 rounds**
