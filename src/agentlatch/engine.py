@@ -56,6 +56,20 @@ class DeliveryEngine:
             raise ValueError(f"clock returned a non-finite value: {value!r}")
         return float(value)
 
+    @staticmethod
+    def _parse_timestamp(raw: bytes | str) -> float | None:
+        """Parse a stored last-speech value; return None if it is unusable.
+
+        last_speech is only ever written by this engine with a finite clock, but
+        a corrupt or non-finite stored value must fail safe (hold) rather than
+        produce a bogus silence and pop immediately.
+        """
+        try:
+            value = float(raw.decode() if isinstance(raw, bytes) else raw)
+        except ValueError:
+            return None
+        return value if math.isfinite(value) else None
+
     async def _mark_speech(self, session_id: str) -> None:
         """Record 'now' as the last-speech time, atomically with its TTL."""
         await self._redis.set(
@@ -83,7 +97,13 @@ class DeliveryEngine:
             await self._mark_speech(session_id)
             return None
 
-        last_speech = float(raw.decode() if isinstance(raw, bytes) else raw)
+        last_speech = self._parse_timestamp(raw)
+        if last_speech is None:
+            # A corrupt or non-finite stored timestamp must never trigger a pop;
+            # treat it as a cold start — reseed the baseline and hold.
+            await self._mark_speech(session_id)
+            return None
+
         silence = self._read_clock() - last_speech
         if silence < self._silence_threshold:
             # Too soon — also holds on a negative delta from clock skew.

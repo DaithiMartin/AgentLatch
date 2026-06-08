@@ -20,13 +20,14 @@ def make_engine(redis_client, tank, now, *, threshold=2.0, ttl=3600):
 
 
 async def test_user_speaking_returns_none_and_records_speech(redis_client, tank, clock):
-    engine = make_engine(redis_client, tank, clock)
+    engine = make_engine(redis_client, tank, clock, ttl=3600)
     await tank.push("s1", ResponsePayload(session_id="s1", text_to_speak="hi"))
 
     result = await engine.get_next_message("s1", is_user_speaking=True)
 
     assert result is None
-    assert await redis_client.get(LAST_SPEECH_KEY) is not None
+    assert await redis_client.get(LAST_SPEECH_KEY) == str(clock()).encode()  # exact time
+    assert 0 < await redis_client.ttl(LAST_SPEECH_KEY) <= 3600  # TTL set and bounded
 
 
 async def test_silence_just_below_threshold_holds(redis_client, tank, clock):
@@ -101,6 +102,31 @@ async def test_nonfinite_clock_raises(redis_client, tank):
     inf_engine = make_engine(redis_client, tank, lambda: float("inf"))
     with pytest.raises(ValueError):
         await inf_engine.get_next_message("s1", is_user_speaking=True)
+
+
+async def test_nonfinite_clock_raises_on_silent_poll(redis_client, tank, clock):
+    # A valid baseline exists, but the clock goes bad during a silent poll.
+    good = make_engine(redis_client, tank, clock)
+    await tank.push("s1", ResponsePayload(session_id="s1", text_to_speak="hi"))
+    await good.get_next_message("s1", is_user_speaking=True)  # baseline at t0
+
+    bad = make_engine(redis_client, tank, lambda: float("nan"))
+    with pytest.raises(ValueError):
+        await bad.get_next_message("s1", is_user_speaking=False)
+    assert await tank.length("s1") == 1  # nothing popped
+
+
+async def test_nonfinite_stored_last_speech_holds(redis_client, tank, clock):
+    # A poisoned last_speech value must never trigger an immediate pop.
+    engine = make_engine(redis_client, tank, clock)
+    await tank.push("s1", ResponsePayload(session_id="s1", text_to_speak="hi"))
+    await redis_client.set(LAST_SPEECH_KEY, "nan")
+
+    assert await engine.get_next_message("s1", is_user_speaking=False) is None
+    assert await tank.length("s1") == 1  # held, not popped
+    # the corrupt value was reseeded to a finite baseline; later silence delivers
+    clock.advance(2.0)
+    assert await engine.get_next_message("s1", is_user_speaking=False) is not None
 
 
 async def test_speech_during_due_delivery_holds_message(redis_client, tank, clock):
