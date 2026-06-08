@@ -97,15 +97,14 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
 
 ---
 
-## Open decisions (for the human gate — cross-checked 2 rounds, see [`plan.md`](./plan.md) §7)
-**Sign-off on these public-surface items is required BEFORE T9 is implemented** (this plan gate +
-T9's build gate), not after.
-- [ ] **`context_injector` constructor param** (Ask-first): pre-planned in SPEC §3.3/§4, keyword-only
-      ⇒ non-breaking. Confirm at the gate.
-- [ ] **Expose `memory_lock(session_id)`** (Ask-first public addition): **recommend YES** — the
+## Open decisions (for the human gate — cross-checked 3 rounds, see [`plan.md`](./plan.md) §7)
+**Both public-surface items signed off 2026-06-08, before T9 is implemented.**
+- [x] **`context_injector` constructor param** (Ask-first): **APPROVED 2026-06-08** — keyword-only
+      ⇒ non-breaking, pre-planned in SPEC §3.3/§4.
+- [x] **Expose `memory_lock(session_id)`** (Ask-first public addition): **APPROVED 2026-06-08** — the
       cross-check showed a deferred accessor leaves the lock decorative and §3.3's memory-safety
-      contract unsatisfiable (plan §4.5). It is a non-reentrant `asyncio.Lock` (deadlock contract
-      documented, plan §4.9). Confirm at the gate.
+      contract unsatisfiable (plan §4.5). Non-reentrant `asyncio.Lock` (deadlock contract documented,
+      plan §4.9).
 *Resolved by cross-check (3 rounds, CONVERGED): inject-before-return uses `is not None` (empty `{}`
 injects); injector validated as a coroutine fn at construction (facade `ValueError` + engine precondition
 `assert`); lock released-after asserted (success + exception); at-most-once documented publicly;

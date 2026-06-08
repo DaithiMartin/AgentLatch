@@ -206,14 +206,12 @@ explicit approval.
    lock, release, then poll — is documented on `memory_lock` and proven by a safe-order test (§3 T9). A
    reentrant lock would deviate from §3.3 and is out of scope.
 
-## 5. Open questions (for the human gate)
-**These public-surface items need sign-off BEFORE T9 is implemented** — at this plan gate, and reaffirmed
-at T9's dev-loop build gate before any code is written (not after T9 is built/merged).
-- **Confirm `context_injector` constructor addition** (Ask-first, pre-planned in SPEC §3.3/§4).
-- **Expose `memory_lock(session_id)` (RECOMMEND YES).** A public-surface addition (SPEC §4 does not list
-  it, though §3.3 implies it). The cross-check established that without it the lock is decorative and the
-  memory-safety contract is unsatisfiable (§4.5). Recommend adding it now, with the non-reentrancy
-  deadlock contract documented (§4.9).
+## 5. Open questions (for the human gate) — RESOLVED
+Both public-surface items were **signed off at the plan gate 2026-06-08**, before T7 starts:
+- **`context_injector` constructor addition** — **APPROVED** (Ask-first, pre-planned in SPEC §3.3/§4).
+- **Expose `memory_lock(session_id)`** — **APPROVED** (the cross-check established a deferred accessor
+  leaves the lock decorative and the memory-safety contract unsatisfiable, §4.5; non-reentrancy
+  deadlock contract documented, §4.9).
 - _(Lock-registry growth is no longer an open question — solved in v1 by the `WeakValueDictionary`
   registry, §4.7.)_
 
