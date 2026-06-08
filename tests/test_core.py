@@ -4,15 +4,18 @@ DAMP: each construction / validation / enqueue case is explicit. fakeredis
 backs the storage (no live Redis).
 """
 
+import asyncio
 import math
 
 import pytest
+from pydantic import ValidationError
 from redis.asyncio import Redis
 
 import agentlatch
 from agentlatch import AgentLatch, ResponsePayload
 from agentlatch.core import _default_now
 from agentlatch.queue import HoldingTank
+from tests.conftest import FakeInjector
 
 NAN = float("nan")
 INF = float("inf")
@@ -132,3 +135,60 @@ async def test_aclose_leaves_injected_client_usable(redis_client: Redis) -> None
     await latch.aclose()
     # We borrow an injected client; aclose must not close it.
     assert await redis_client.llen("anything") == 0
+
+
+# --- T9: context_injector wiring + the memory_lock cooperation lock ---
+
+
+async def test_accepts_context_injector_instance(redis_client: Redis) -> None:
+    # The facade owns ONE SessionLocks and hands both the injector and that same
+    # registry down to the engine, so memory_lock and the injection share locks.
+    injector = FakeInjector()
+    latch = AgentLatch(redis_client=redis_client, context_injector=injector)
+    assert latch._engine._injector is injector
+    assert latch._engine._locks is latch._locks
+
+
+async def test_default_construction_has_no_injector(redis_client: Redis) -> None:
+    latch = AgentLatch(redis_client=redis_client)
+    assert latch._engine._injector is None
+
+
+# A bare object, a plain function, an int, a string — none is a ContextInjector
+# instance, so the facade rejects each at construction (plan §4.8), before a bad
+# injector could fail only after a message was already dequeued.
+@pytest.mark.parametrize("bad", [object(), lambda s, d: None, 42, "injector"])
+async def test_rejects_non_context_injector(redis_client: Redis, bad) -> None:
+    with pytest.raises(ValueError):
+        AgentLatch(redis_client=redis_client, context_injector=bad)
+
+
+async def test_memory_lock_returns_an_asyncio_lock(redis_client: Redis) -> None:
+    latch = AgentLatch(redis_client=redis_client)
+    assert isinstance(latch.memory_lock("s1"), asyncio.Lock)
+
+
+async def test_memory_lock_normalizes_session_id(redis_client: Redis) -> None:
+    # Same NonEmptyStr adapter as enqueue/get_next_message: a padded id resolves
+    # to the same lock object. (The first result stays referenced on the stack
+    # across the second call, so the WeakValueDictionary entry can't be GC'd
+    # between them — this asserts normalization, not weak-ref behavior.)
+    latch = AgentLatch(redis_client=redis_client)
+    assert latch.memory_lock(" s1 ") is latch.memory_lock("s1")
+
+
+async def test_memory_lock_distinct_sessions_get_distinct_locks(
+    redis_client: Redis,
+) -> None:
+    latch = AgentLatch(redis_client=redis_client)
+    a = latch.memory_lock("s1")
+    b = latch.memory_lock("s2")
+    assert a is not b
+
+
+async def test_memory_lock_rejects_empty_session_id(redis_client: Redis) -> None:
+    # Normalized through NonEmptyStr, a whitespace-only id strips to empty and is
+    # rejected loudly rather than minting a lock under a degenerate key.
+    latch = AgentLatch(redis_client=redis_client)
+    with pytest.raises(ValidationError):
+        latch.memory_lock("   ")

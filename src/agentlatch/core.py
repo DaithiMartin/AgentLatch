@@ -7,6 +7,7 @@ injectable clock (default UTC wall clock) so the timing edge-cases are unit
 testable without ever sleeping (SPEC §3.4).
 """
 
+import asyncio
 import math
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ from pydantic import StrictBool, TypeAdapter
 from redis.asyncio import Redis
 
 from agentlatch.engine import DeliveryEngine
+from agentlatch.memory import ContextInjector, SessionLocks
 from agentlatch.queue import HoldingTank
 from agentlatch.schemas import NonEmptyStr, ResponsePayload
 
@@ -69,6 +71,19 @@ def _validate_clock(now: Callable[[], float]) -> Callable[[], float]:
     return now
 
 
+def _validate_context_injector(
+    injector: ContextInjector | None,
+) -> ContextInjector | None:
+    # The ContextInjector ABC already guarantees inject_context is a coroutine
+    # (its __init_subclass__ rejects a sync override at class-definition), so the
+    # facade only needs the type gate here: a ContextInjector instance, or None.
+    # Rejecting loudly at construction stops a bad injector from failing only
+    # after a message has already been dequeued.
+    if injector is not None and not isinstance(injector, ContextInjector):
+        raise ValueError("context_injector must be a ContextInjector instance or None")
+    return injector
+
+
 class AgentLatch:
     """Wires the Receiver and the Delivery Engine over one Redis source.
 
@@ -79,6 +94,14 @@ class AgentLatch:
     ``now`` is an optional keyword-only clock (``() -> float`` epoch seconds,
     default the UTC wall clock); it exists so timing is deterministically
     testable (SPEC §3.4) and, being keyword-only, is non-breaking to add.
+
+    ``context_injector`` is an optional :class:`ContextInjector`; when set, the
+    engine awaits it (under the per-session lock) before returning any held
+    message that carries a ``silent_context_update`` (SPEC §3.3).
+
+    One event loop per instance: the per-session locks are ``asyncio.Lock``s,
+    which are loop-affine, so a single ``AgentLatch`` must be used from one event
+    loop (matching the single-poll-loop-per-session contract, SPEC §3.4).
     """
 
     def __init__(
@@ -89,6 +112,7 @@ class AgentLatch:
         silence_threshold: float = 2.0,
         session_ttl: int = 3600,
         now: Callable[[], float] | None = None,
+        context_injector: ContextInjector | None = None,
     ) -> None:
         if (redis_url is None) == (redis_client is None):
             raise ValueError("provide exactly one of redis_url or redis_client")
@@ -96,6 +120,7 @@ class AgentLatch:
         self.silence_threshold = _validate_silence_threshold(silence_threshold)
         self.session_ttl = _validate_session_ttl(session_ttl)
         self._now = _validate_clock(now) if now is not None else _default_now
+        self._injector = _validate_context_injector(context_injector)
 
         if redis_client is not None:
             self._redis = redis_client
@@ -105,6 +130,10 @@ class AgentLatch:
             self._redis = Redis.from_url(redis_url)
             self._owns_client = True
 
+        # One shared registry: the facade exposes its locks via memory_lock and
+        # passes the SAME registry to the engine, so the lock a developer guards
+        # their memory reads with is the lock the injection acquires.
+        self._locks = SessionLocks()
         self._tank = HoldingTank(self._redis, self.session_ttl)
         self._engine = DeliveryEngine(
             self._redis,
@@ -112,6 +141,8 @@ class AgentLatch:
             silence_threshold=self.silence_threshold,
             session_ttl=self.session_ttl,
             now=self._now,
+            injector=self._injector,
+            locks=self._locks,
         )
 
     async def enqueue(self, payload: ResponsePayload) -> None:
@@ -136,6 +167,28 @@ class AgentLatch:
         speaking = _IS_SPEAKING_ADAPTER.validate_python(is_user_speaking)
         normalized_id = _SESSION_ID_ADAPTER.validate_python(session_id)
         return await self._engine.get_next_message(normalized_id, speaking)
+
+    def memory_lock(self, session_id: str) -> asyncio.Lock:
+        """Return the per-session lock AgentLatch holds while injecting context.
+
+        Guard your LLM's memory **reads** with this lock
+        (``async with latch.memory_lock(session_id): ...``) so a context
+        injection — which AgentLatch runs under this *same* lock before a held
+        message surfaces (SPEC §3.3) — cannot mutate memory mid-read.
+        ``session_id`` is normalized exactly like :meth:`enqueue` /
+        :meth:`get_next_message`, so the lock you acquire is the same object the
+        injection acquires.
+
+        The lock is a plain, **non-reentrant** ``asyncio.Lock``: never call
+        :meth:`get_next_message` for a session while holding its ``memory_lock``
+        — a due injection re-acquires the same lock and the task deadlocks.
+        Acquire it around memory reads only, and release it *before* polling.
+
+        One event loop per ``AgentLatch`` instance (``asyncio.Lock`` is
+        loop-affine).
+        """
+        normalized_id = _SESSION_ID_ADAPTER.validate_python(session_id)
+        return self._locks.get(normalized_id)
 
     async def aclose(self) -> None:
         """Close the Redis client, but only if this instance created it."""

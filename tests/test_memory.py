@@ -40,6 +40,30 @@ def test_sync_inject_context_override_is_rejected() -> None:
                 return None
 
 
+def test_sync_inject_context_inherited_via_mixin_is_rejected() -> None:
+    # A sync inject_context inherited from a non-ContextInjector mixin is not in
+    # the subclass __dict__, but it IS what AgentLatch would await. The ABC must
+    # resolve via the MRO and reject it at class-definition — otherwise this is an
+    # instantiable ContextInjector with a sync method that fails only post-LPOP.
+    class SyncMixin:
+        def inject_context(self, session_id: str, data: dict) -> None:
+            return None
+
+    with pytest.raises(TypeError):
+
+        class Bad(SyncMixin, ContextInjector):  # type: ignore[misc]
+            pass
+
+
+def test_non_callable_inject_context_is_rejected() -> None:
+    # inject_context shadowed by a non-callable attribute is not awaitable; the
+    # MRO-resolving check rejects it at class-definition rather than at await.
+    with pytest.raises(TypeError):
+
+        class Bad(ContextInjector):
+            inject_context = None  # type: ignore[assignment]
+
+
 async def test_concrete_subclass_injects() -> None:
     class Spy(ContextInjector):
         def __init__(self) -> None:
