@@ -6,8 +6,8 @@ Status tracker for the `dev-loop`. Architecture, DAG, and design notes live in
 > **Slices 1 & 2 ✅ COMPLETE** — T0–T6 merged, CP-A/CP-B/CP-C approved (PRs #1–#9); the
 > ingest **and** delivery paths are built and live-smoke-verified. Full history in git.
 > **This slice (3)** injects silent context into the live LLM's memory **before** a held
-> message is spoken. Plan signed off 2026-06-08; **T7–T9 merged** (PRs #10–#12); **next: CP-D**
-> (Slice 3 completion gate) — per-task status below.
+> message is spoken. Plan signed off 2026-06-08; **T7–T9 merged** (PRs #10–#13); **CP-D APPROVED
+> 2026-06-08 — Slice 3 COMPLETE.** Next: Slice 4 (sandbox) via `/slice-plan`.
 
 **Status legend:** `[ ]` pending · `[~]` PR open (link) · `[x]` merged.
 A task flips to `[x]` only on **merge** (the next task's start flips it).
@@ -103,14 +103,16 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
         across a `get_next_message` that injects would deadlock — documented on the method, plan §4.9.)
 - **Verify:** `uv run pytest && uv run ruff check . && uv run mypy src`
 
-### CP-D — Slice 3 complete · inject-before-TTS proven (human gate)  `[ ]`
+### CP-D — Slice 3 complete · inject-before-TTS proven (human gate)  `[x]` — APPROVED 2026-06-08
 - **Depends on:** T9 merged.
-- **Evidence to present:** full suite + `ruff` + `mypy src` green; SPEC §7 gate 4 holds
+- **Evidence presented:** full suite + `ruff` + `mypy src` green (122 passed); SPEC §7 gate 4 holds
   (`inject_context` awaited **under `memory_lock`**, **before** the payload is returned, **only** when
   `silent_context_update` is present **and** an injector is configured); the no-injector path is
   unchanged; injection ordering proven (memory updated before the text surfaces); `memory_lock` returns
-  the same lock the injection uses. Optional: a live real-Redis round-trip with a real injector.
-- **Approval:** await explicit user OK, then mark `[x]`.
+  the same lock the injection uses. **Live real-Redis round-trip** (throwaway `redis:alpine`) confirmed
+  inject-before-TTS end-to-end. Slice-completion test audit **PASS** (7/7 cross-module mutations caught;
+  3 MINOR weak-catches folded — PR #13). Doc-freshness applied (SPEC §3.3/§4 `memory_lock`).
+- **Approval:** **APPROVED 2026-06-08** (PR #13 merged; user sign-off).
 
 ---
 
