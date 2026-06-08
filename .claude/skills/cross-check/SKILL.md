@@ -64,7 +64,14 @@ rounds=3 model=gpt-5.5 effort=high`).
 ### Step 1 — Assemble the grounding
 
 Read the target and build a **grounding block** the critic gets every round. This is what makes the
-critique find *our* bugs, not textbook ones. Include:
+critique find *our* bugs, not textbook ones.
+
+**Point, don't transcribe.** The critic has full repo access — it can read `SPEC.md`, `tasks/todo.md`,
+and the diff file itself. So the grounding is mostly *pointers* ("read SPEC §9; the task is `T8` in
+`tasks/todo.md`; the diff is `/tmp/cross-check-diff.patch`") plus only what it *can't* infer: the
+**settled-decision deltas** it must not re-litigate, and the task-specific framing. Don't paste large
+slabs of boundary/acceptance text it can read itself — that's wasted effort and context, every round.
+Include:
 
 - **Intent / the "why" — so the critic argues *with* the settled rationale, not against it.** Give
   it what is already decided and why: the project's objective and **scope discipline** (**SPEC §1–§2**
@@ -76,14 +83,17 @@ critique find *our* bugs, not textbook ones. Include:
   *independent* read; over-feeding your framing anchors the critic into agreeing with you. Give it the
   *what-and-why-decided*, then let it judge independently whether the plan executes correctly within
   that intent.
-- **SPEC §9 Boundaries** — the Always / Ask-first / Never lists, verbatim or tightly summarized.
+- **SPEC §9 Boundaries** — point the critic at §9 (Always / Ask-first / Never); don't transcribe the lists.
 - **The real seams** for this repo: never `asyncio.sleep()` to measure silence (timestamp diffing
   only); real `redis.asyncio` calls, never a Python `dict`; the clock is an injectable callable;
   `fastapi` is an optional extra, never a hard core dep; one module at a time; mutate LLM memory
   only under the idle lock.
 - For `plan` mode: the slice's **Goal / Acceptance** from `tasks/todo.md`.
-- For `diff` mode: write the diff to a file the critic can read —
-  `git diff <target> > /tmp/cross-check-diff.patch` — and name the touched files.
+- For `diff` mode: **commit your fixes first, then** write the diff —
+  `git diff <target> > /tmp/cross-check-diff.patch` — and name the touched files. `<target>` defaults to
+  `main...HEAD`, which is **committed-only**: an uncommitted fix won't be in the patch, so **regenerate it
+  after every commit** or the critic reviews stale code and burns a round flagging "the patch still has
+  the old code" (this bit us on T7).
 
 ### Step 2 — The critic prompt (sent each round)
 

@@ -71,7 +71,9 @@ Branch off `main` with a descriptive name drawn from the task — e.g. `feat/sca
   | high-stakes (security, auth, irreversible, the crisis path) | `agent-skills:doubt-driven-development` |
 
 - Implement to the **Acceptance criteria**, stay in scope (~5 files). Use `uv` for everything
-  (`uv run pytest`, `uv add …`). Stage the change and **commit with the `commit-message` skill** — it
+  (`uv run pytest`, `uv add …`). **Repo test mechanics** (shared doubles, the `from tests.conftest import`
+  package path, `pytest-asyncio` mode) → `tests/README.md`; the strategy is SPEC §7. Stage the change and
+  **commit with the `commit-message` skill** — it
   writes a Conventional-Commit (50/72) from the staged diff and makes the commit. Use it at *every* commit
   step in this loop. Keep the `Co-Authored-By` trailer crediting the assistant.
 - **Confirm before any irreversible or outward-facing action** mid-build — a `docker push`, a deploy, a
