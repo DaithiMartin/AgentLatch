@@ -10,6 +10,7 @@ developer can guard their LLM's memory *reads* with it too.
 
 import abc
 import asyncio
+import inspect
 import weakref
 from typing import Any
 
@@ -22,7 +23,20 @@ class ContextInjector(abc.ABC):
     (``AgentLatch.memory_lock(session_id)``) **before** returning the held
     message, so the LLM's memory is updated prior to TTS. Guard your LLM's
     memory *reads* with the same lock to avoid mutating memory mid-read.
+
+    A **synchronous** override is rejected at class-definition time: AgentLatch
+    ``await``s ``inject_context``, so a non-coroutine override would fail only
+    after a message was already dequeued. Enforcing it here makes a sync
+    override impossible to define, rather than a runtime surprise.
     """
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        impl = cls.__dict__.get("inject_context")
+        if impl is not None and not inspect.iscoroutinefunction(impl):
+            raise TypeError(
+                f"{cls.__name__}.inject_context must be defined with 'async def'"
+            )
 
     @abc.abstractmethod
     async def inject_context(self, session_id: str, data: dict[str, Any]) -> None:

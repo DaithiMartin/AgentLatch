@@ -5,6 +5,7 @@ T7 is foundational — it defines the contract and the lock primitive; the engin
 (T8) and facade (T9) wire them. No Redis here.
 """
 
+import gc
 import weakref
 from asyncio import Lock
 
@@ -27,6 +28,16 @@ def test_subclass_without_inject_context_is_abstract() -> None:
 
     with pytest.raises(TypeError):
         Incomplete()  # type: ignore[abstract]
+
+
+def test_sync_inject_context_override_is_rejected() -> None:
+    # AgentLatch awaits inject_context; a sync override would fail only after a
+    # message was dequeued, so it must be impossible to even define.
+    with pytest.raises(TypeError):
+
+        class SyncInjector(ContextInjector):
+            def inject_context(self, session_id: str, data: dict) -> None:  # type: ignore[override]
+                return None
 
 
 async def test_concrete_subclass_injects() -> None:
@@ -70,14 +81,29 @@ def test_session_locks_registry_is_weak() -> None:
     assert isinstance(locks._locks, weakref.WeakValueDictionary)
 
 
+def test_session_locks_releases_unreferenced_lock() -> None:
+    # The behavioural half of the weak design: once no one holds the lock it is
+    # collected, so the registry self-cleans rather than leaking per session.
+    locks = SessionLocks()
+    lock = locks.get("s1")
+    assert "s1" in locks._locks
+
+    del lock
+    gc.collect()
+
+    assert "s1" not in locks._locks
+
+
 def test_context_injector_exported_session_locks_internal() -> None:
     assert agentlatch.ContextInjector is ContextInjector
-    # Public surface is exact: the three names + version are exported, and the
-    # internal lock registry is not.
-    assert {"AgentLatch", "ResponsePayload", "ContextInjector", "__version__"} <= set(
-        agentlatch.__all__
-    )
-    assert "SessionLocks" not in agentlatch.__all__
+    # Public surface is exact: precisely these names are exported (so a future
+    # accidental export is caught too), and the internal lock registry is not.
+    assert set(agentlatch.__all__) == {
+        "AgentLatch",
+        "ContextInjector",
+        "ResponsePayload",
+        "__version__",
+    }
     assert not hasattr(agentlatch, "SessionLocks")
     # The pre-existing exports still resolve.
     assert agentlatch.AgentLatch is AgentLatch
