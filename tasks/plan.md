@@ -99,8 +99,10 @@ Acceptance + Verify commands are in [`todo.md`](./todo.md). These are the decisi
   stays internal — exposed only through `AgentLatch.memory_lock`.)
 
 ### T8 — `engine.py` · inject-before-return under the per-session lock
-- **Engine gains** keyword-only `injector: ContextInjector | None = None` and `locks: SessionLocks`
-  (the facade always supplies the registry it also exposes — §4.5). `__init__` asserts the precondition
+- **Engine gains** keyword-only `injector: ContextInjector | None = None` and
+  `locks: SessionLocks | None = None` (defaults to a fresh internal `SessionLocks()` if not supplied —
+  keeps the existing `test_engine.py` constructions green; the facade passes its **shared** registry so
+  `memory_lock` returns the same lock the engine acquires — §4.5). `__init__` asserts the precondition
   `injector is None or inspect.iscoroutinefunction(injector.inject_context)` — mirroring the existing
   `is_user_speaking` bool-assert, this catches a bad injector passed via **direct** engine construction
   at construction time (before any `LPOP`); the user-facing `ValueError` lives at the facade (§4.8).
@@ -118,14 +120,24 @@ Acceptance + Verify commands are in [`todo.md`](./todo.md). These are the decisi
 - **At-most-once on failure** (§4.4): LPOP precedes inject, so a raising `inject_context` propagates
   and the popped message is **not** returned or re-queued. `async with` releases the lock on both the
   success and exception paths.
-- **Tests** (`test_inject.py`, DAMP — fakeredis + injected clock + a `FakeInjector` spy in
-  `conftest.py`): a payload with `silent_context_update` after sufficient silence → `inject_context`
-  awaited with `(session_id, data)` **before** return; the per-session lock is **held** during the
-  call (`FakeInjector` checks `engine._locks.get(sid).locked()` is True) **and released** afterward;
-  the lock is also released after a **raising** injector; an **empty `{}`** still injects; **no**
-  injection without `silent_context_update`; **no** injection when `injector is None` (un-injected
-  return = Slice 2 regression); a raising injector **propagates** + leaves the queue empty; two ctx
-  payloads release **FIFO** with injection between. No `asyncio.sleep`, no Redis lock.
+- **Tests** (`test_inject.py`, DAMP — fakeredis + injected clock + a configurable `FakeInjector` spy in
+  `conftest.py`). The cross-check hardened the *proofs* (§7), so they are precise about ordering and the
+  `WeakValueDictionary`/lock-identity interaction:
+  - **Inject-before-return is gated:** a **blocking** injector (`asyncio.Event`) lets the test assert the
+    `get_next_message` task is **not done** while injection blocks, then returns the payload after
+    release. `entered.wait()` is wrapped in `asyncio.wait_for` (test-hang guard, not silence timing).
+  - **Lock held/released on the captured object:** the `FakeInjector` retains a **strong ref** to the
+    exact lock during injection; the test asserts `lock_held_during_call is True`, then that *same*
+    object is unlocked after **success and a raise**, and `engine._locks.get(sid)` **is** it (so the
+    release assertion can't be fooled by a freshly-GC-recreated lock).
+  - **At-most-once:** the raising injector records `queue.length` **at entry** (== 0 ⇒ LPOP-before-inject)
+    and the test asserts `queue.length == 0` **after** the exception (not re-queued).
+  - **Lock scope:** a pop-spy asserts the lock is **unlocked during the pop** (wraps only inject); a
+    `SessionLocks` get-spy asserts **zero** lock acquisitions on the no-ctx / no-injector / empty-queue
+    paths.
+  - Plus: **empty `{}`** still injects; the no-injector path is the **Slice 2 regression** (un-injected
+    return); two ctx payloads release **FIFO** with injection between; direct construction with a **sync**
+    `inject_context` duck raises `AssertionError`. No `asyncio.sleep`, no Redis lock.
 
 ### T9 — `core.py` · facade wiring + the cooperation lock
 - **Constructor:** add keyword-only `context_injector: ContextInjector | None = None`. Validate it is
