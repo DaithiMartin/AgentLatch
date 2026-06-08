@@ -13,8 +13,10 @@ CP-A & CP-B approved. Slice 2 (Delivery Engine): T5 ([PR #8](https://github.com/
 + T6 ([PR #9](https://github.com/DaithiMartin/AgentLatch/pull/9)) merged, **CP-C approved
 2026-06-08**. The full library round-trip (ingest → hold → release on ≥ 2.0s silence,
 FIFO) is built, unit-tested, and **live-smoke-verified against a real Redis** with the
-real wall clock. **Next: Slice 3** (Context Injector) — needs a fresh `/slice-plan`
-before any dev-loop task. Per-task status in `tasks/todo.md`.
+real wall clock. **Slice 3 (Context Injector) is underway:** planned via `/slice-plan`
+(cross-checked 3 rounds, see `tasks/plan.md` §7) and signed off; **T7 (`memory.py`) is in
+review — [PR #10](https://github.com/DaithiMartin/AgentLatch/pull/10).** **Next: T8** (engine
+inject-before-return under the lock), then T9, then CP-D. Per-task status in `tasks/todo.md`.
 
 ## What exists
 
@@ -37,6 +39,11 @@ before any dev-loop task. Per-task status in `tasks/todo.md`.
   [PR #9](https://github.com/DaithiMartin/AgentLatch/pull/9)).
 - Optional FastAPI receiver (`agentlatch.integrations.fastapi.create_router`):
   `POST /api/v1/queue_response` → 202/422, import-guarded behind the extra.
+- Context Injector seam (`agentlatch.memory`, T7 — in review,
+  [PR #10](https://github.com/DaithiMartin/AgentLatch/pull/10)): `ContextInjector`
+  ABC (exported; a sync `inject_context` override is rejected at class-definition
+  via `__init_subclass__`) + internal `SessionLocks`, a `WeakValueDictionary`
+  per-session `asyncio.Lock` registry that self-cleans. Wired by T8/T9.
 
 ## Infra / repo facts
 

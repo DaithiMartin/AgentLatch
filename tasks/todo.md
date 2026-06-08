@@ -7,7 +7,7 @@ Status tracker for the `dev-loop`. Architecture, DAG, and design notes live in
 > ingest **and** delivery paths are built and live-smoke-verified. Full history in git +
 > [`HANDOFF.md`](../HANDOFF.md).
 > **This slice (3)** injects silent context into the live LLM's memory **before** a held
-> message is spoken. Next after sign-off: `dev-loop` picks up the topmost task below.
+> message is spoken. Plan signed off 2026-06-08; **T7 in review** — per-task status below.
 
 **Status legend:** `[ ]` pending · `[~]` PR open (link) · `[x]` merged.
 A task flips to `[x]` only on **merge** (the next task's start flips it).
@@ -15,7 +15,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
 
 ---
 
-### T7 — `memory.py` · `ContextInjector` ABC + `SessionLocks`  `[ ]`
+### T7 — `memory.py` · `ContextInjector` ABC + `SessionLocks`  `[~]` — [PR #10](https://github.com/DaithiMartin/AgentLatch/pull/10)
 - **Depends on:** none (Slices 1 & 2 merged).
 - **Do:** new `src/agentlatch/memory.py` — (1) `class ContextInjector(abc.ABC)` with one abstract
   coroutine `async def inject_context(self, session_id: str, data: dict[str, Any]) -> None` (SPEC §3.3;
@@ -25,14 +25,18 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   while keeping identity whenever it's held (single-event-loop use, plan §4.6/§4.7). Export
   `ContextInjector` from `src/agentlatch/__init__.py` `__all__` (`SessionLocks` stays internal). Add
   `tests/test_memory.py`.
-- **Acceptance:**
-  - [ ] Instantiating `ContextInjector()` directly raises `TypeError`; a subclass that doesn't
+- **Acceptance:** (all met — 9 tests; independent Claude reviewer **PASS** + Codex `cross-check
+  mode=diff` **0 BLOCKER/0 MAJOR**)
+  - [x] Instantiating `ContextInjector()` directly raises `TypeError`; a subclass that doesn't
         implement `inject_context` also raises `TypeError`. A concrete `async` subclass instantiates
-        and its `inject_context` is awaitable, returning `None`.
-  - [ ] `SessionLocks().get(sid)` returns an `asyncio.Lock`; the **same** object on repeated calls for
-        one `sid` (while a reference is held), and **distinct** objects for distinct `sid`s.
-  - [ ] `ContextInjector` imports from the top-level package and is in `__all__`; existing
-        `AgentLatch`/`ResponsePayload` exports still resolve. `SessionLocks` is **not** exported.
+        and its `inject_context` is awaitable, returning `None`. **(+ a *sync* override is rejected at
+        class-definition via `__init_subclass__` — folded from the diff cross-check.)**
+  - [x] `SessionLocks().get(sid)` returns an `asyncio.Lock`; the **same** object on repeated calls for
+        one `sid` (while a reference is held), and **distinct** objects for distinct `sid`s; the weak
+        backing is pinned **and** an unreferenced lock is GC-released (self-cleaning proven).
+  - [x] `ContextInjector` imports from the top-level package and is in `__all__` (asserted by **exact**
+        set equality); existing `AgentLatch`/`ResponsePayload` exports still resolve. `SessionLocks`
+        is **not** exported.
 - **Verify:** `uv run pytest tests/test_memory.py && uv run ruff check . && uv run mypy src`
 
 ### T8 — `engine.py` · inject-before-return under the per-session lock  `[ ]`
@@ -64,8 +68,8 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
 ### T9 — `core.py` · wire `context_injector` + expose `memory_lock`  `[ ]`
 - **Depends on:** T8.
 - **Do:** add keyword-only `context_injector: ContextInjector | None = None` to `AgentLatch.__init__`;
-  validate it is `None` **or** a `ContextInjector` whose `inject_context` is a coroutine function
-  (`inspect.iscoroutinefunction`), else raise **`ValueError`** (plan §4.8). Own a `SessionLocks`; pass
+  validate it is `None` **or** a `ContextInjector` instance, else raise **`ValueError`** (async-ness is
+  already guaranteed by the ABC's `__init_subclass__` from T7 — plan §4.8). Own a `SessionLocks`; pass
   `injector` + `locks` to the `DeliveryEngine`. Add `memory_lock(self, session_id: str) ->
   asyncio.Lock` returning the lock for the **normalized** id (same `NonEmptyStr` adapter as
   `get_next_message`), with a docstring stating the read-cooperation contract (plan §4.5/§4.6). Extend
@@ -77,8 +81,8 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
         returns the `ResponsePayload`.
   - [ ] Default construction (no `context_injector`) returns the payload **un-injected** — Slice 2
         behavior intact; exports unchanged except the new `ContextInjector` (T7).
-  - [ ] A non-`ContextInjector` (e.g. `object()`), **or** a `ContextInjector` subclass whose
-        `inject_context` is **sync**/non-callable → `ValueError` at construction.
+  - [ ] A non-`ContextInjector` (e.g. `object()`, a bare function) → `ValueError` at construction. (A
+        **sync** `inject_context` subclass can no longer be *defined* — the ABC rejects it in T7.)
   - [ ] `memory_lock(" s1 ")` returns the **same** lock object the injection for `"s1"` acquires
         (normalized id) — the developer's read-lock matches the injection lock.
   - [ ] The **documented safe order** round-trips: acquire+release `memory_lock("s1")`, then
