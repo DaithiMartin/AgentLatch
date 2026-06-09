@@ -68,7 +68,8 @@ Both sides **log the sid they used** so a mismatch is obvious.
 
 ## Run each app
 
-Each app has its own setup; create the venv **inside** its directory.
+Each app has its own setup; create the venv **inside** its directory. Paths below
+are **repo-root-relative**, matching the Redis commands above.
 
 ### `edge_pipecat/` — the Fast Edge (Zone 1) · T11 + T13
 Absorbs webhooks (`receiver.py`, run under uvicorn) **and** delivers held messages
@@ -77,7 +78,7 @@ Redis — only the delivery process polls, so the single-poll-loop contract (SPE
 §3.4) holds.
 
 ```bash
-cd edge_pipecat
+cd sandbox/edge_pipecat
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt      # (T11) installs core via the [fastapi] extra, editable
 uvicorn receiver:app                  # the webhook absorber → POST /api/v1/queue_response  (T11)
@@ -91,7 +92,7 @@ A LangGraph `StateGraph` whose one node sleeps (simulated heavy compute) then
 AgentLatch internals.
 
 ```bash
-cd backend_langgraph
+cd sandbox/backend_langgraph
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt      # langgraph + httpx
 SESSION_ID=$SESSION_ID python graph.py   # invoke the compiled graph → fires the webhook  (T12)
