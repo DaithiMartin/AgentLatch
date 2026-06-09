@@ -69,13 +69,21 @@ checkpoint needs the prior PR *merged* first (green CI, a live round-trip).
 ### 6. Cross-check the plan ← the hook
 Before any human sees the plan, run the second-model critic:
 
-> **`cross-check mode=plan target=tasks/plan.md rounds=3`**
+> **`cross-check mode=plan target=tasks/plan.md rounds=<rounds>`**
+
+`<rounds>` is the critic's round cap — **default `3`**, overridable from this skill's args: invoke
+`/slice-plan … rounds=5` (or pass `rounds=N` in the args) and slice-plan feeds that straight through to
+`cross-check`. Raise it for a **wide or high-stakes slice** where you want the second model to keep
+pushing past three rounds toward a confirming (CONVERGED) round; leave it at 3 for routine slices. Read
+`rounds` from this skill's args, else default 3.
 
 Pass it the grounding (SPEC §9 Boundaries + the repo seams + the slice's Acceptance from
 `tasks/todo.md`). Then **fold every surviving BLOCKER/MAJOR into `tasks/plan.md` / `tasks/todo.md`**
-(or, for any you reject, keep the critic's logged reason). Carry the cross-check report's verdict and
-`reviewed with: <model>` line forward to the human gate. If it **DEADLOCKs**, surface the open
-disagreements to the human rather than burying them.
+(or, for any you reject, keep the critic's logged reason). Carry the cross-check report's verdict —
+**`CONVERGED`, `ROUNDS_EXHAUSTED`, or `DEADLOCK`** — and the `reviewed with: <model>` line forward to
+the human gate. If it **DEADLOCKs** (open disagreement) **or ends `ROUNDS_EXHAUSTED`** (the round budget
+ran out with the final fixes unverified by the critic — *not* the same as agreement), surface that to
+the human rather than burying it; they may want to raise `rounds` and re-run before signing off.
 
 ### 7. Present for human review (gate)
 Show the human: the slice goal, the task list, the checkpoints, and the **cross-check verdict** (what
@@ -99,4 +107,6 @@ touches two independent subsystems.
 - [ ] Dependencies identified and ordered; no task > ~5 files.
 - [ ] CP-* checkpoints exist between capabilities.
 - [ ] SPEC §9 Boundaries are respected by the plan.
-- [ ] `cross-check mode=plan` ran; surviving BLOCKER/MAJOR folded in; verdict + model recorded.
+- [ ] `cross-check mode=plan` ran (at the `rounds` cap — default 3, or the value passed in); surviving
+      BLOCKER/MAJOR folded in; verdict (`CONVERGED` / `ROUNDS_EXHAUSTED` / `DEADLOCK`) + model recorded,
+      and a non-CONVERGED verdict surfaced to the human (not relabelled as agreement).
