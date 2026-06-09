@@ -7,7 +7,7 @@ Status tracker for the `dev-loop`. Architecture, DAG, and design notes live in
 > library (ingest, delivery, context injection) is built and live-smoke-verified. Full history in git.
 > **This slice (4)** proves the whole path in a **live environment** (SPEC §8) — a dev Redis, a Pipecat
 > WebRTC edge, a LangGraph backend, and the human **Interruption Test** — **without changing core**.
-> Plan drafted 2026-06-08; **T10 PR-open ([#16](https://github.com/DaithiMartin/AgentLatch/pull/16)); next: T11**.
+> Plan drafted 2026-06-08; **T10 merged ([#16](https://github.com/DaithiMartin/AgentLatch/pull/16)); T11 PR-open ([#18](https://github.com/DaithiMartin/AgentLatch/pull/18)); next: T12**.
 
 **Status legend:** `[ ]` pending · `[~]` PR open (link) · `[x]` merged.
 A task flips to `[x]` only on **merge** (the next task's start flips it).
@@ -19,7 +19,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
 
 ---
 
-### T10 — dev Redis + sandbox scaffold  `[~]` — [PR #16](https://github.com/DaithiMartin/AgentLatch/pull/16)
+### T10 — dev Redis + sandbox scaffold  `[x]` — [PR #16](https://github.com/DaithiMartin/AgentLatch/pull/16) (merged)
 - **Depends on:** none (Slices 1–3 merged).
 - **Do:** root `docker-compose.yml` running **only** `redis:alpine` on `6379` (with a `redis-cli ping`
   healthcheck); `sandbox/README.md` documenting the **isolation contract** (own venv per app; never add
@@ -41,7 +41,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
         `redis` + `pydantic`, `fastapi` extra only).
 - **Verify:** `docker compose config && docker compose up -d && docker exec $(docker compose ps -q redis) redis-cli ping && docker compose down` ; ruff exclude proof with cleanup-on-failure: `( trap 'rm -f sandbox/_rufftest.py' EXIT; printf 'import os\n' > sandbox/_rufftest.py && uv run ruff check . )` ; `uv run pytest -q && uv run mypy src` ; **core frozen:** `git diff --exit-code -- src/agentlatch` **and** `git diff --exit-code -- uv.lock` (lock unchanged — the ruff edit isn't a dep) ; **boundary scan:** `grep -rniE 'pipecat|langgraph|langchain' pyproject.toml uv.lock .github src` returns **nothing**.
 
-### T11 — edge receiver: AgentLatch + FastAPI router  `[ ]`
+### T11 — edge receiver: AgentLatch + FastAPI router  `[~]` — [PR #18](https://github.com/DaithiMartin/AgentLatch/pull/18)
 - **Depends on:** T10.
 - **Do:** `sandbox/edge_pipecat/receiver.py` — construct `AgentLatch(redis_url="redis://localhost:6379")`
   and mount `create_router(latch)` (the Slice-1 router → `POST /api/v1/queue_response`), exposing
@@ -49,19 +49,22 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   package with the fastapi extra**, editable (`-e ../..[fastapi]`), plus `uvicorn`. Brief run notes in
   `sandbox/edge_pipecat/README.md` (or folded into the sandbox README). The receiver **only enqueues**.
 - **Acceptance:**
-  - [ ] In a fresh `edge_pipecat` venv, `pip install -r requirements.txt` pulls `fastapi` via the
+  - [x] In a fresh `edge_pipecat` venv, `pip install -r requirements.txt` pulls `fastapi` via the
         **extra** (not core); core `pyproject` still lists only `redis` + `pydantic`.
-  - [ ] `uvicorn receiver:app` starts; `POST /api/v1/queue_response` with a valid `ResponsePayload`
+  - [x] `uvicorn receiver:app` starts; `POST /api/v1/queue_response` with a valid `ResponsePayload`
         body (using the shared `SESSION_ID`) → **202** `{"status":"queued"}`; the item is in Redis with
         a **bounded TTL** (`0 < TTL agentlatch:queue:<SESSION_ID> ≤ 3600`); the stored value, **parsed
         as `ResponsePayload`** (core serializes the model — incl. `silent_context_update: null` — so
         compare *normalized fields*, not raw request bytes), has the `session_id`/`text_to_speak` posted.
-  - [ ] An invalid body (missing `text_to_speak` or an extra key) → **422** and the queue length is
+  - [x] An invalid body (missing `text_to_speak` or an extra key) → **422** and the queue length is
         **unchanged** by that request (check the count before vs after — not "== 0", since a prior valid
         item may be queued).
-  - [ ] **Core frozen:** `git diff --exit-code -- src/agentlatch` and `git diff --exit-code -- uv.lock`
+  - [x] **Core frozen:** `git diff --exit-code -- src/agentlatch` and `git diff --exit-code -- uv.lock`
         both empty; core `pyproject` lists only `redis` + `pydantic` (`fastapi` extra only).
-- **Verify:** (Redis up) from `sandbox/edge_pipecat`: fresh venv + `pip install -r requirements.txt`; start `uvicorn receiver:app` with a **readiness wait** (poll `:8000` until up; **fail if 8000 already occupied**) and a `trap`-killed PID. Use a **unique sid per run** (or `redis-cli DEL agentlatch:queue:$SID` first) so stale state can't skew it: valid POST == **202**, `redis-cli TTL agentlatch:queue:$SID` in `(0,3600]`, and a **parse helper** asserts the stored value is a `ResponsePayload` — `python -c "import json,redis,agentlatch; r=redis.Redis(); raw=r.lindex(f'agentlatch:queue:{SID}',-1); p=agentlatch.ResponsePayload(**json.loads(raw)); assert p.text_to_speak==EXPECTED"`; record `LLEN`, then invalid POST == **422** with `LLEN` **unchanged**. **Boundary/freeze (from repo root, e.g. `git -C ../.. …`):** `grep -rniE 'pipecat|langgraph|langchain' ../../pyproject.toml ../../uv.lock ../../.github ../../src` empty; `git -C ../.. diff --exit-code -- src/agentlatch uv.lock pyproject.toml`.
+  - [x] **Enqueue-only (§3.4):** the receiver process **never polls** — `grep -q get_next_message
+        sandbox/edge_pipecat/receiver.py` returns nothing. (Added from the T11 verify review: makes the
+        §3.4 "receiver doesn't poll" property a mechanical gate, not inspection-only.)
+- **Verify:** (Redis up) from `sandbox/edge_pipecat`: fresh venv + `pip install -r requirements.txt`; start `uvicorn receiver:app` with a **readiness wait** (poll `:8000` until up; **fail if 8000 already occupied**) and a `trap`-killed PID. Use a **unique sid per run** (or `redis-cli DEL agentlatch:queue:$SID` first) so stale state can't skew it: valid POST == **202**, `redis-cli TTL agentlatch:queue:$SID` in `(0,3600]`, and a **parse helper** asserts the stored value is a `ResponsePayload` — `python -c "import json,redis,agentlatch; r=redis.Redis(); raw=r.lindex(f'agentlatch:queue:{SID}',-1); p=agentlatch.ResponsePayload(**json.loads(raw)); assert p.text_to_speak==EXPECTED"`; record `LLEN`, then invalid POST == **422** with `LLEN` **unchanged**. **Boundary/freeze (from repo root, e.g. `git -C ../.. …`):** `grep -rniE 'pipecat|langgraph|langchain' ../../pyproject.toml ../../uv.lock ../../.github ../../src` empty; `git -C ../.. diff --exit-code -- src/agentlatch uv.lock pyproject.toml`. **Enqueue-only (§3.4):** `grep -q get_next_message receiver.py` returns nothing (the receiver must never poll).
 
 ### T12 — LangGraph backend: webhook fire after compute  `[ ]`
 - **Depends on:** T11 (a receiver to POST to).
