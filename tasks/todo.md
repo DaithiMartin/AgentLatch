@@ -7,7 +7,7 @@ Status tracker for the `dev-loop`. Architecture, DAG, and design notes live in
 > library (ingest, delivery, context injection) is built and live-smoke-verified. Full history in git.
 > **This slice (4)** proves the whole path in a **live environment** (SPEC §8) — a dev Redis, a Pipecat
 > WebRTC edge, a LangGraph backend, and the human **Interruption Test** — **without changing core**.
-> Plan drafted 2026-06-08; **next: T10**.
+> Plan drafted 2026-06-08; **T10 PR-open ([#16](https://github.com/DaithiMartin/AgentLatch/pull/16)); next: T11**.
 
 **Status legend:** `[ ]` pending · `[~]` PR open (link) · `[x]` merged.
 A task flips to `[x]` only on **merge** (the next task's start flips it).
@@ -19,7 +19,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
 
 ---
 
-### T10 — dev Redis + sandbox scaffold  `[ ]`
+### T10 — dev Redis + sandbox scaffold  `[~]` — [PR #16](https://github.com/DaithiMartin/AgentLatch/pull/16)
 - **Depends on:** none (Slices 1–3 merged).
 - **Do:** root `docker-compose.yml` running **only** `redis:alpine` on `6379` (with a `redis-cli ping`
   healthcheck); `sandbox/README.md` documenting the **isolation contract** (own venv per app; never add
@@ -27,14 +27,16 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   runbook** (CP-E steps) — pointing to SPEC §8, not duplicating it. In core `pyproject.toml`, add
   `extend-exclude = ["sandbox"]` under `[tool.ruff]` (tooling scope only — **no dependency added**).
 - **Acceptance:**
-  - [ ] `docker compose config` is valid; `docker compose up -d` makes Redis answer `PING` on `6379`;
+  - [x] `docker compose config` is valid; `docker compose up -d` makes Redis answer `PING` on `6379`;
         `docker compose down` cleans up. compose defines **only** the `redis` service (no app services).
-  - [ ] `sandbox/README.md` states the §5 isolation boundary, the per-app run steps, and the CP-E runbook.
-  - [ ] `uv run ruff check .` stays clean and does **not** lint `sandbox/`: prove it with an
+        *(Redis bound to `127.0.0.1` per cross-check — unauthenticated dev datastore stays off the LAN.)*
+  - [x] `sandbox/README.md` states the §5 isolation boundary, the per-app run steps, and the CP-E runbook.
+  - [x] `uv run ruff check .` stays clean and does **not** lint `sandbox/`: prove it with an
         **ephemeral** `sandbox/_rufftest.py` carrying a deliberate unused import — created **and
         deleted inside the Verify step** (never committed) — that `ruff check .` does **not** flag.
         `uv run pytest` still passes **122** (no sandbox collection); `uv run mypy src` clean.
-  - [ ] **Core untouched:** `git diff --exit-code -- src/agentlatch` is empty; the only
+        *(Mutation-tested: removing the exclude flips ruff red, F401 — gate is load-bearing.)*
+  - [x] **Core untouched:** `git diff --exit-code -- src/agentlatch` is empty; the only
         `pyproject.toml` change is the `[tool.ruff] extend-exclude` line (no dep added; deps stay
         `redis` + `pydantic`, `fastapi` extra only).
 - **Verify:** `docker compose config && docker compose up -d && docker exec $(docker compose ps -q redis) redis-cli ping && docker compose down` ; ruff exclude proof with cleanup-on-failure: `( trap 'rm -f sandbox/_rufftest.py' EXIT; printf 'import os\n' > sandbox/_rufftest.py && uv run ruff check . )` ; `uv run pytest -q && uv run mypy src` ; **core frozen:** `git diff --exit-code -- src/agentlatch` **and** `git diff --exit-code -- uv.lock` (lock unchanged — the ruff edit isn't a dep) ; **boundary scan:** `grep -rniE 'pipecat|langgraph|langchain' pyproject.toml uv.lock .github src` returns **nothing**.
