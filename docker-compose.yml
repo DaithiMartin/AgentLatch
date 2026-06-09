@@ -1,0 +1,15 @@
+# Dev + sandbox datastore ONLY (SPEC §8). The sandbox apps run on the host in
+# their own venvs (see sandbox/README.md) — compose is just the shared Redis they
+# all point at. Deliberately a single service: containerizing the Pipecat edge
+# (audio/WebRTC) is out of scope and fights the "own venv per app" isolation model.
+services:
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      # `redis-cli ping` → PONG once the server is accepting connections.
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
