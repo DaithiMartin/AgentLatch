@@ -146,30 +146,52 @@ codex exec resume "$THREAD_ID" \
 2. **Arbitrate every BLOCKER and MAJOR** — Claude has final say; the critic advises, it does not
    command. For each: **accept** → revise the plan/code and note what changed; or **reject** → log a
    one-line reason. MINORs are recorded, not gating.
-   - If, after arbitration, **no BLOCKER or MAJOR remains open** → **CONVERGED**, go to Step 4.
-   - Else revise the target, increment `ROUND`, and resume (Step 3) — unless `ROUND > rounds`.
-3. If `ROUND > rounds` with an open BLOCKER/MAJOR → **DEADLOCK**, go to Step 4. Do NOT fake
-   convergence — a surfaced disagreement beats a false "approved".
+   - **CONVERGED** — the critic returned a **clean round** this round (`OPEN_BLOCKERS: 0  OPEN_MAJORS:
+     0`): the second model had nothing material left to add. **This is the only verdict that means
+     genuine agreement** — the critic *saw the final state and signed off on it*. Go to Step 4.
+   - Else (BLOCKER/MAJOR found this round) **and `ROUND < rounds`** → fold the accepted findings (the
+     rejected ones stay open), revise the target, `ROUND += 1`, and resume (Step 3). Note: findings you
+     fold are **unverified** until a later round re-reviews them.
+3. **At the cap** — a round found BLOCKER/MAJOR **and `ROUND == rounds`** (no clean round was reached
+   within budget). Do NOT fake convergence; pick the honest terminal verdict:
+   - If **any BLOCKER/MAJOR is open (rejected)** → **DEADLOCK** — a genuine Claude-vs-critic
+     disagreement the human must break.
+   - Else (the final round's findings were **all accepted and folded**, but **no further round confirmed
+     them**) → **ROUNDS_EXHAUSTED** — the round budget ran out with the last fixes **unverified by the
+     critic**. This is **not** CONVERGED: "we ran out of tries" ≠ "we agreed". Record the unverified
+     final-round folds so the human/implementer knows what carries no critic pass. (If those folds were
+     high-stakes, the caller may **raise `rounds` and re-run** to push for a confirming round.)
+   Go to Step 4.
 
 ### Step 4 — Return
 
 Return a compact report to the caller (`slice-plan`, `dev-loop`, or the user):
 
 ```
-## cross-check — mode=<mode> · reviewed with: <model> (effort=<effort>) · rounds used: <n>
-Verdict: CONVERGED | DEADLOCK
+## cross-check — mode=<mode> · reviewed with: <model> (effort=<effort>) · rounds used: <n>/<rounds>
+Verdict: CONVERGED | ROUNDS_EXHAUSTED | DEADLOCK
 
 Findings:
 - [SEV] area: finding — Fix: … → accepted (changed X) | rejected (reason) | recorded (minor)
 
+Unverified final-round folds (ROUNDS_EXHAUSTED only): <findings accepted+folded in the last round that the critic never re-reviewed — carry no critic pass>
 Open disagreements (DEADLOCK only): <critic's point vs. Claude's counter-position>
 ```
+
+The three verdicts are **not** interchangeable:
+- **CONVERGED** — the critic returned a clean round; the second model saw the final state and had nothing
+  left. Genuine agreement.
+- **ROUNDS_EXHAUSTED** — the `rounds` budget ran out while still folding accepted findings; the final
+  fixes are sound to Claude but **unconfirmed by the critic**. Raising `rounds` and re-running may earn a
+  confirming (CONVERGED) round.
+- **DEADLOCK** — the cap was hit with an open BLOCKER/MAJOR Claude **rejected**: a real disagreement.
 
 `reviewed with: <model>` is mandatory — a review's provenance is never ambiguous. The `--json` stream
 does NOT echo the served model, so surface the **pinned** value: a wrong or unauthorized slug fails the
 call with no `thread.started` line, so a successful run *is* confirmation the pin took. In `dev-loop`
-this report goes in the PR body; in `slice-plan` it's shown at the human gate; on DEADLOCK the human
-breaks the tie.
+this report goes in the PR body; in `slice-plan` it's shown at the human gate. On **DEADLOCK** the human
+breaks the tie; on **ROUNDS_EXHAUSTED** the human decides whether the unverified folds are acceptable or
+warrant another run.
 
 ### Step 5 — Degradation (never hard-fail)
 
@@ -190,7 +212,10 @@ a same-model fallback (cross-context, not cross-model).
 - Claude is the final arbiter on every finding — incorporate good critiques, reject bad ones *with a
   logged reason*. Don't cave on everything (defeats the cross-model check) and don't ignore it
   (defeats the point).
-- Surface DEADLOCK honestly. Never report CONVERGED with an open BLOCKER/MAJOR.
+- **`CONVERGED` is reserved for a clean critic round — the second model must have *seen and signed off
+  on* the final state.** Never label a cap-hit run CONVERGED: if the last round's findings were folded
+  without a confirming round it's **`ROUNDS_EXHAUSTED`** (fixes unverified); if a BLOCKER/MAJOR is
+  open/rejected at the cap it's **`DEADLOCK`**. Surface both honestly — "ran out of tries" is not "agreed".
 
 ## What NOT to do
 
