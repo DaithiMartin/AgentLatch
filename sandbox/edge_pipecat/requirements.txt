@@ -1,0 +1,5 @@
+# Fast Edge (Zone 1) — its OWN venv. Installs the local core package editable,
+# pulling FastAPI via the [fastapi] EXTRA (never into core deps). T13 adds
+# pipecat-ai here; T11 needs only the receiver's stack.
+-e ../..[fastapi]
+uvicorn
