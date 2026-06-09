@@ -55,6 +55,12 @@ testpaths = ["tests"]
 target-version = "py311"
 line-length = 100
 src = ["src", "tests"]
+# Tooling scope only — keep the core lint off the isolated sandbox apps, which
+# import heavy WebRTC/agent libs uninstalled in core and follow their own
+# conventions. Adds NO dependency; the §5 boundary stays clean. (Slice 4 / T10.)
+# (Lib names deliberately not spelled out here: the slice's boundary-scan grep
+# treats any such token in a core file as a leak.)
+extend-exclude = ["sandbox"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
