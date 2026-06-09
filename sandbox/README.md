@@ -104,14 +104,16 @@ SESSION_ID=$SESSION_ID python graph.py   # invoke the compiled graph → fires t
 
 The SPEC §8 final verification, run by a human on a real WebRTC client. **Do not
 duplicate the spec here** — read [SPEC §8](../SPEC.md#8-end-to-end-sandbox-manual-verification)
-for the authoritative definition. Operationally:
+for the authoritative definition. Operationally (each app command runs from its
+own directory with that app's venv active — see **Run each app** above):
 
-1. `docker compose up -d` (Redis healthy); `export SESSION_ID=sandbox-demo` in
-   every shell.
-2. Start the edge: `uvicorn receiver:app` (shell 1) and `python edge.py` (shell 2).
+1. From repo root: `docker compose up -d` (Redis healthy); `export
+   SESSION_ID=sandbox-demo` in **every** shell below.
+2. Start the edge from `sandbox/edge_pipecat` (venv active): `uvicorn
+   receiver:app` (shell 1) and `python edge.py` (shell 2).
 3. Join the WebRTC session and **speak one long continuous sentence**.
-4. **Mid-sentence**, trigger the LangGraph backend (`python graph.py`, shell 3,
-   same `SESSION_ID`) so the webhook fires.
+4. **Mid-sentence**, from `sandbox/backend_langgraph` (venv active, same
+   `SESSION_ID`) trigger the backend: `python graph.py` (shell 3) — the webhook fires.
 5. **PASS** = AgentLatch **holds** the message in Redis and the TTS is injected
    **only after** the human pauses **> 2.0s** — never cutting into live speech.
 
