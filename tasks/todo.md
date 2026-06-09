@@ -7,7 +7,7 @@ Status tracker for the `dev-loop`. Architecture, DAG, and design notes live in
 > library (ingest, delivery, context injection) is built and live-smoke-verified. Full history in git.
 > **This slice (4)** proves the whole path in a **live environment** (SPEC §8) — a dev Redis, a Pipecat
 > WebRTC edge, a LangGraph backend, and the human **Interruption Test** — **without changing core**.
-> Plan drafted 2026-06-08; **T10–T11 merged ([#16](https://github.com/DaithiMartin/AgentLatch/pull/16), [#18](https://github.com/DaithiMartin/AgentLatch/pull/18)); T12 PR-open ([#19](https://github.com/DaithiMartin/AgentLatch/pull/19)); next: T13**.
+> Plan drafted 2026-06-08; **T10–T12 merged ([#16](https://github.com/DaithiMartin/AgentLatch/pull/16), [#18](https://github.com/DaithiMartin/AgentLatch/pull/18), [#19](https://github.com/DaithiMartin/AgentLatch/pull/19)); T13 PR-open ([#21](https://github.com/DaithiMartin/AgentLatch/pull/21)); next: CP-E** (the live Interruption Test — human gate, after T13 merges).
 
 **Status legend:** `[ ]` pending · `[~]` PR open (link) · `[x]` merged.
 A task flips to `[x]` only on **merge** (the next task's start flips it).
@@ -66,7 +66,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
         §3.4 "receiver doesn't poll" property a mechanical gate, not inspection-only.)
 - **Verify:** (Redis up) from `sandbox/edge_pipecat`: fresh venv + `pip install -r requirements.txt`; start `uvicorn receiver:app` with a **readiness wait** (poll `:8000` until up; **fail if 8000 already occupied**) and a `trap`-killed PID. Use a **unique sid per run** (or `redis-cli DEL agentlatch:queue:$SID` first) so stale state can't skew it: valid POST == **202**, `redis-cli TTL agentlatch:queue:$SID` in `(0,3600]`, and a **parse helper** asserts the stored value is a `ResponsePayload` — `python -c "import json,redis,agentlatch; r=redis.Redis(); raw=r.lindex(f'agentlatch:queue:{SID}',-1); p=agentlatch.ResponsePayload(**json.loads(raw)); assert p.text_to_speak==EXPECTED"`; record `LLEN`, then invalid POST == **422** with `LLEN` **unchanged**. **Boundary/freeze (from repo root, e.g. `git -C ../.. …`):** `grep -rniE 'pipecat|langgraph|langchain' ../../pyproject.toml ../../uv.lock ../../.github ../../src` empty; `git -C ../.. diff --exit-code -- src/agentlatch uv.lock pyproject.toml`. **Enqueue-only (§3.4):** `grep -q get_next_message receiver.py` returns nothing (the receiver must never poll).
 
-### T12 — LangGraph backend: webhook fire after compute  `[~]` — [PR #19](https://github.com/DaithiMartin/AgentLatch/pull/19)
+### T12 — LangGraph backend: webhook fire after compute  `[x]` — [PR #19](https://github.com/DaithiMartin/AgentLatch/pull/19) (merged)
 - **Depends on:** T11 (a receiver to POST to).
 - **Do:** `sandbox/backend_langgraph/graph.py` — a `StateGraph` with **one node**: `await
   asyncio.sleep(SLEEP_S)` (default 10; env-overridable for the smoke check) then `httpx` POST a
@@ -86,7 +86,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
         `pyproject`/`uv.lock` carry no `langgraph`/`langchain` (lock byte-identical).
 - **Verify:** (Redis + T11 receiver running) `backend_langgraph` venv + install; with a clean key (`redis-cli DEL agentlatch:queue:$SID`) record `LLEN`, then `SLEEP_S=0 SESSION_ID=$SID WEBHOOK_URL=http://localhost:8000/api/v1/queue_response python -c '...ainvoke...'` exits 0 (202 asserted via raise_for_status) and `LLEN agentlatch:queue:$SID` **increments by exactly one** (same sid the edge will poll). **Boundary/freeze (repo root):** `grep -rniE 'pipecat|langgraph|langchain' pyproject.toml uv.lock .github src` empty; `git diff --exit-code -- src/agentlatch uv.lock pyproject.toml`. **Non-202 raises (no swallow):** re-run with `WEBHOOK_URL=http://localhost:8000/api/v1/WRONG` (404) → `python graph.py` exits **non-zero** and `LLEN` unchanged (a contract drift / 422 must surface, never be swallowed).
 
-### T13 — Pipecat edge delivery: poll → TextFrame  `[ ]`
+### T13 — Pipecat edge delivery: poll → TextFrame  `[~]` — [PR #21](https://github.com/DaithiMartin/AgentLatch/pull/21)
 - **Depends on:** T11 (shares the edge `AgentLatch`); T10 (Redis).
 - **Do:** `sandbox/edge_pipecat/frame_processor.py` — a custom Pipecat `FrameProcessor` that
   **tracks** `is_user_speaking` *state* from VAD frames (`UserStartedSpeakingFrame`→True,
@@ -109,16 +109,16 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   two concurrent pollers** on one session (SPEC §3.4). Polls must continue **after**
   `UserStoppedSpeakingFrame` or a held message starves.
 - **Acceptance:**
-  - [ ] `test_frame_processor.py` (edge venv, **injected clock — no `sleep`**) proves the timing curve:
+  - [x] `test_frame_processor.py` (edge venv, **injected clock — no `sleep`**) proves the timing curve:
         start-speaking → several **continued-speech** polls (each re-stamps `last_speech`) → stop →
         at **1.999s** of silence **no `TextFrame`** is pushed → crossing **≥2.0s** pushes **exactly one**
         `TextFrame` whose text == `payload.text_to_speak`. (A start/stop-only implementation fails the
         1.999s case by releasing early.) A raw `str` is **never** pushed.
-  - [ ] **Post-stop polling continues (automated):** a deterministic test (no real silence frames /
+  - [x] **Post-stop polling continues (automated):** a deterministic test (no real silence frames /
         injected ticks) proves the processor **keeps polling after `UserStoppedSpeakingFrame`** via the
         serialized poll path — and that the frame-poll and periodic-poll **never run concurrently** for
         one session (in-flight guard) — so a held message is neither starved nor double-polled (§3.4).
-  - [ ] **Core frozen:** `uv run pytest` still **122** (sandbox test not collected); core
+  - [x] **Core frozen:** `uv run pytest` still **122** (sandbox test not collected); core
         `pyproject`/`uv.lock` gain **no** `pipecat-ai`; `git diff --exit-code -- src/agentlatch uv.lock
         pyproject.toml` empty.
 - **Verify:** (edge venv) `pytest sandbox/edge_pipecat/test_frame_processor.py` green; from core: `uv run pytest -q` == 122; **boundary/freeze:** `grep -rniE 'pipecat|langgraph|langchain' pyproject.toml uv.lock .github src` empty; `git diff --exit-code -- src/agentlatch uv.lock pyproject.toml`. (Full WebRTC run is the CP-E human test.)
