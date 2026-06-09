@@ -55,6 +55,12 @@ Each task delivers one complete, testable capability as far as its layer reaches
 - **`tasks/todo.md`** — one entry per task, in dependency order, each with:
   - **Acceptance** — specific, testable conditions.
   - **Verify** — the exact commands (`uv run pytest …` + any manual check) dev-loop will run cold.
+    **Every Acceptance bullet must map to a Verify step that *exercises* it — not just asserts it.**
+    A guarantee that holds only "by inspection" (e.g. "the receiver never polls", "a non-202 raises")
+    needs a Verify command that would go **red** if it broke — a `grep` gate, an error-path assertion,
+    a mutation the test catches — or the task ships an unchecked promise the reviewer has to catch
+    after the fact (this gap shipped in Slice-4 T11 and T12). Before finalizing, walk each Acceptance
+    bullet and point at the Verify line that fails when that bullet is violated.
   - **Depends on** — task IDs (or "none").
   - **Do** — the in-scope files (~5 max).
   - Tracker state `[ ]` pending → `[~]` PR open → `[x]` merged (dev-loop owns the transitions).
@@ -97,13 +103,15 @@ touches two independent subsystems.
 
 ## Red flags
 - Tasks without Acceptance or Verify steps.
+- An Acceptance bullet with **no Verify step that exercises it** — an inspection-only guarantee.
 - No CP-* checkpoints between capabilities.
 - Dependency order ignored (e.g. starting `engine.py` before `queue.py` is covered).
 - A task touching far more than ~5 files.
 - The plan presented to the human **without** a cross-check pass.
 
 ## Verification (before handing the plan to the human)
-- [ ] Every task has Acceptance + a runnable Verify block.
+- [ ] Every task has Acceptance + a runnable Verify block, and **every Acceptance bullet maps to a
+      Verify step that exercises it** (no inspection-only guarantees).
 - [ ] Dependencies identified and ordered; no task > ~5 files.
 - [ ] CP-* checkpoints exist between capabilities.
 - [ ] SPEC §9 Boundaries are respected by the plan.
