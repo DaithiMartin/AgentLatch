@@ -1,78 +1,86 @@
-# Plan — Slice 3: The Context Injector
+# Plan — Slice 4: The End-to-End Sandbox
 
-> Source of truth: [`SPEC.md`](../SPEC.md) (esp. §3.3, §3.4, §4, §7 gate 4, §9).
-> Per-task status, Acceptance, and Verify steps live in [`todo.md`](./todo.md) (the
-> dev-loop tracker). This file owns the **architecture, dependency graph, and design
-> notes** for this slice. Workflow conventions are the repo's
+> Source of truth: [`SPEC.md`](../SPEC.md) (esp. §5 structure + **Architectural boundary**, §8 the
+> sandbox + Interruption Test, §9 Boundaries, §10 item 4). Per-task status, Acceptance, and Verify
+> live in [`todo.md`](./todo.md) (the dev-loop tracker). This file owns the **architecture, dependency
+> graph, and design notes**. Workflow conventions are the repo's
 > [`dev-loop`](../.claude/skills/dev-loop/SKILL.md) skill — not restated here.
 >
-> **Previous:** Slice 1 (Receiver + Holding Tank, PRs #1–#5) and Slice 2 (Delivery
-> Engine, PRs #8–#9, CP-C approved) — COMPLETE. Status in [`todo.md`](./todo.md); git for history.
+> **Previous:** Slices 1–3 COMPLETE — Receiver + Holding Tank (PRs #1–#5), Delivery Engine (PRs #8–#9),
+> Context Injector (PRs #10–#13); CP-A–CP-D approved. The full **core library** (`schemas`, `queue`,
+> `engine`, `memory`, `core`, `integrations/fastapi`) is built, tested, and live-smoke-verified.
+> Status in [`todo.md`](./todo.md); git for history.
 
-**Created:** 2026-06-08 · **Status:** drafted — cross-checked (see §7), pending human sign-off
+**Created:** 2026-06-08 · **Status:** drafted — pending cross-check (§7) + human sign-off
 
 ---
 
 ## 1. Goal of this slice
 
-Silently update the live LLM's memory **before** a held message is spoken, so the agent
-can speak naturally about a backend result. Implement `memory.py` (the `ContextInjector`
-ABC **and** the per-session lock registry that guards mutation), wire the inject-before-
-return step into the Delivery Engine, and expose the cooperation lock on the facade:
+Prove the whole AgentLatch path **in a live environment** — VAD timing + Redis queueing end-to-end —
+without adding one line to the core library. Slice 4 is **integration scaffolding only**: a dev Redis,
+a Pipecat WebRTC edge that polls the Delivery Engine and speaks held messages, a LangGraph backend that
+fires the webhook after simulated heavy compute, and the human-run **Interruption Test** (SPEC §8) as
+the final gate.
 
-```python
-class MyInjector(ContextInjector):
-    async def inject_context(self, session_id: str, data: dict) -> None:
-        async with my_memory_guard:          # the developer's own mutation is already
-            await my_llm.update_memory(session_id, data)   # called UNDER latch.memory_lock(sid)
+The capability proven: a background result that arrives **mid-sentence** is **held** in Redis and
+released into TTS **only after the human pauses > 2.0s** — never interrupting speech.
 
-latch = AgentLatch(redis_url="redis://…", silence_threshold=2.0, context_injector=MyInjector())
-await latch.enqueue(ResponsePayload(
-    session_id="s1", text_to_speak="your order shipped",
-    silent_context_update={"order_status": "shipped"},
-))
-# In the voice loop, the developer guards their LLM memory READS with the SAME lock:
-async with latch.memory_lock("s1"):
-    ... read memory while generating ...
-# …≥ 2.0s of silence later…
-msg = await latch.get_next_message("s1", is_user_speaking=False)
-# inject_context(...) is awaited UNDER latch.memory_lock("s1") BEFORE msg is returned →
-# the LLM's memory is updated before the text reaches TTS, with no read/write interleave.
+**The hard constraint that shapes every task (SPEC §5 boundary, §9 Never):** `pipecat-ai`, `langchain`,
+`langgraph` (and their transitive deps) live **only** under `/sandbox`, each app in its **own venv /
+`requirements.txt`**. They **never** touch core `pyproject.toml`. `fastapi` stays an optional extra.
+Each task's Verify re-asserts this with the **full freeze gate** (§4.8/§4.12): a
+`pipecat|langgraph|langchain` scan across `pyproject.toml`/`uv.lock`/`.github`/`src` **plus**
+`git diff --exit-code` on `src/agentlatch`, `uv.lock`, and `pyproject.toml` (the last changes **only**
+in T10, for the one `ruff` line) — name-grep alone misses transitive lock leaks.
+
+```
+                 docker-compose (redis:alpine :6379)   ← T10
+                          ▲                 ▲
+        enqueue (RPUSH)   │                 │  poll get_next_message / LPOP
+                          │                 │
+   backend_langgraph ──POST /api/v1/queue_response──►  edge_pipecat
+   (sleep → httpx)        │   receiver (create_router)   ├─ receiver.py  ← T11
+        T12               │   + delivery (FrameProcessor)└─ edge.py / frame_processor.py ← T13
+                          ▼                 ▼
+                     one Redis; one AgentLatch per process; shared via Redis keys
+                          │
+                          ╚══ CP-E ── the Interruption Test (human, live WebRTC)
 ```
 
-**Out of scope (later slices):**
-- **`/sandbox`** (Pipecat edge, LangGraph backend, the live Interruption Test) — **Slice 4**.
-- A persistent/cross-process lock or lock garbage-collection — see §4.7 (v1 limitation).
+**Out of scope:** any change to the core library or its public API (Slice 4 is consumer-only); a
+production deployment topology; auth on the webhook; persisting sandbox state. If the sandbox reveals a
+*core* bug or a missing seam, that is a **SPEC/plan finding** — stop and fix the core via `dev-loop`,
+don't patch around it in the sandbox.
 
 ---
 
 ## 2. Dependency graph
 
 ```
-schemas.ResponsePayload (silent_context_update field — Slice 1 ✅)
-queue.HoldingTank (LPOP/FIFO — Slice 1 ✅) · engine.DeliveryEngine (Slice 2 ✅)
+core library (Slices 1–3 ✅) — consumed as an installed package, never modified
  │
  ▼
-T7  memory.py · ContextInjector ABC: async inject_context(session_id, data) -> None
- │     + SessionLocks registry: get(session_id) -> asyncio.Lock (lazy, per-session, in-process)
- │     + top-level export `from agentlatch import ContextInjector` (SPEC §4)
+T10  docker-compose.yml (redis:alpine :6379) + /sandbox/README.md (isolation contract + runbook)
+ │      + core tooling: exclude /sandbox from `ruff check .` (keep core lint off sandbox code)
  ▼
-T8  engine.py · inject-before-return under the per-session lock
- │     pop → if payload.silent_context_update is not None AND injector is not None:
- │              async with locks.get(session_id): await injector.inject_context(session_id, data)
- │           return payload                       (un-injected when no injector / no ctx)
- │     + DAMP tests (FakeInjector spy): inject ran UNDER the lock, BEFORE return; lock RELEASED
- │       after success AND after a raising injector; empty `{}` still injects; no-injector regression
+T11  sandbox/edge_pipecat/receiver.py — AgentLatch(redis_url) + create_router (the Slice-1 router);
+ │      runnable via uvicorn; requirements.txt = agentlatch[fastapi] (editable, local) + uvicorn
  ▼
-T9  core.py · AgentLatch(context_injector=…) keyword-only; validate it's a ContextInjector whose
- │     inject_context is a coroutine fn; own the SessionLocks, pass injector+locks to the engine;
- │     expose `memory_lock(session_id) -> asyncio.Lock` (normalized id); facade round-trip tests
+T12  sandbox/backend_langgraph/graph.py — StateGraph: one node sleeps then httpx-POSTs the webhook;
+ │      requirements.txt = langgraph + httpx.  (Depends on T11: a receiver to POST to)
+ ▼
+T13  sandbox/edge_pipecat/{frame_processor.py, edge.py} — Pipecat FrameProcessor polls
+ │      get_next_message, wraps a returned payload in TextFrame; minimal pipeline wiring; a
+ │      sandbox-local FrameProcessor unit test. requirements += pipecat-ai.  (Depends on T11)
  │
- ╚══ CP-D ── inject-before-TTS proven (memory updated before the payload surfaces); human gate
+ ╚══ CP-E ── the Interruption Test (SPEC §8), human-run on live WebRTC; needs T10–T13 merged + redis up
 ```
 
-Bottom-up: define the contract + lock (T7), enforce the guarantee at the engine (T8),
-expose it on the facade (T9). SPEC §9 "one module at a time" is honored.
+Bottom-up and each task leaves a **provable** increment: Redis up (T10) → webhook→Redis over HTTP
+(T11) → backend→webhook→Redis (T12) → held message → TextFrame under silence (T13) → full human loop
+(CP-E). Risk is concentrated in T13 (the unfamiliar Pipecat API); its core logic is unit-tested in
+isolation so the WebRTC-only parts are all that remain for the human gate.
 
 ---
 
@@ -80,195 +88,210 @@ expose it on the facade (T9). SPEC §9 "one module at a time" is honored.
 
 Acceptance + Verify commands are in [`todo.md`](./todo.md). These are the decisions behind them.
 
-### T7 — `memory.py` · `ContextInjector` ABC + `SessionLocks`
-- **ABC:** `class ContextInjector(abc.ABC)` with one abstract coroutine
-  `async def inject_context(self, session_id: str, data: dict[str, Any]) -> None` (SPEC §3.3).
-  `@abstractmethod` alone only enforces the name is overridden — **not** that the override is a
-  coroutine — so the ABC adds an `__init_subclass__` that **rejects a non-coroutine (sync or
-  non-callable) override at class-definition time** (`inspect.iscoroutinefunction`). This is the
-  strongest, unbypassable layer (you cannot even define a sync injector), folded from the T7 diff
-  cross-check; it supersedes the facade-only check that was planned for T9 (§4.8).
-- **`SessionLocks`:** a tiny registry — `get(self, session_id: str) -> asyncio.Lock`, lazily
-  creating and caching one `asyncio.Lock` per session id in a **`weakref.WeakValueDictionary`** (§4.7).
-  A session's lock survives exactly while someone holds a strong ref — an in-flight injection (the
-  engine's `async with`) or the developer's `memory_lock` block — and is GC'd once nobody does, so the
-  registry **self-cleans** with no lifetime leak while preserving lock **identity** whenever mutual
-  exclusion actually matters. Lazy creation is safe because all access is from a single event loop
-  (§4.6); `asyncio.Lock()` is loop-unbound at construction and weakly-referenceable on 3.11.
-- **Export:** add `ContextInjector` to `agentlatch/__init__.py` `__all__` (SPEC §4). (`SessionLocks`
-  stays internal — exposed only through `AgentLatch.memory_lock`.)
+### T10 — dev Redis + sandbox scaffold
+- **`docker-compose.yml` at root** runs **only** `redis:alpine` on `6379` (SPEC §8 — "dev + sandbox
+  only"). The sandbox apps run on the host in their own venvs; compose is just the shared datastore. A
+  named service `redis` with `ports: ["6379:6379"]` and a healthcheck (`redis-cli ping`).
+- **`sandbox/README.md`** is the home for: the **isolation contract** (own venv per app; never add
+  pipecat/langchain/langgraph to core), how to bring up Redis, how to run each app, and the
+  **Interruption Test runbook** (the CP-E steps). It points to SPEC §8, doesn't duplicate it.
+- **Core tooling — exclude `/sandbox` from the core lint.** `uv run ruff check .` runs from the repo
+  root and would otherwise lint sandbox code (which imports uninstalled-in-core libs and follows its
+  own conventions). Add `extend-exclude = ["sandbox"]` under `[tool.ruff]`. **This is the one core
+  `pyproject.toml` edit in the slice** — it is *tooling scope only*, adds **no** dependency, and keeps
+  the §5 boundary clean (core checks never reach into sandbox). `mypy` already scopes to `src` only;
+  `pytest` already scopes to `tests` only — confirm both still hold (no sandbox collection).
+- **Decision — compose runs Redis only, not the apps.** Faithful to SPEC §8 ("docker-compose.yml … runs
+  redis:alpine"). Containerizing pipecat (audio/WebRTC) is out of scope and fights the "own venv" model.
 
-### T8 — `engine.py` · inject-before-return under the per-session lock
-- **Engine gains** keyword-only `injector: ContextInjector | None = None` and
-  `locks: SessionLocks | None = None` (defaults to a fresh internal `SessionLocks()` if not supplied —
-  keeps the existing `test_engine.py` constructions green; the facade passes its **shared** registry so
-  `memory_lock` returns the same lock the engine acquires — §4.5). `__init__` asserts the precondition
-  `injector is None or inspect.iscoroutinefunction(injector.inject_context)` — mirroring the existing
-  `is_user_speaking` bool-assert, this catches a bad injector passed via **direct** engine construction
-  at construction time (before any `LPOP`); the user-facing `ValueError` lives at the facade (§4.8).
-- **Wiring** (replaces the final `return await self._tank.pop(session_id)`):
-  ```
-  payload = await self._tank.pop(session_id)
-  if payload is not None and payload.silent_context_update is not None and self._injector is not None:
-      async with self._locks.get(session_id):
-          await self._injector.inject_context(session_id, payload.silent_context_update)
-  return payload
-  ```
-  Realises SPEC §3.4 (*LPOP → if `silent_context_update` run the injector under the lock → return*).
-  The guard is **`is not None`**, not truthiness, so an **empty `{}`** context update still injects
-  (it is "present"). The lock wraps **only** the `inject_context` await.
-- **At-most-once on failure** (§4.4): LPOP precedes inject, so a raising `inject_context` propagates
-  and the popped message is **not** returned or re-queued. `async with` releases the lock on both the
-  success and exception paths.
-- **Tests** (`test_inject.py`, DAMP — fakeredis + injected clock + a configurable `FakeInjector` spy in
-  `conftest.py`). The cross-check hardened the *proofs* (§7), so they are precise about ordering and the
-  `WeakValueDictionary`/lock-identity interaction:
-  - **Inject-before-return is gated:** a **blocking** injector (`asyncio.Event`) lets the test assert the
-    `get_next_message` task is **not done** while injection blocks, then returns the payload after
-    release. `entered.wait()` is wrapped in `asyncio.wait_for` (test-hang guard, not silence timing).
-  - **Lock held/released on the captured object:** the `FakeInjector` retains a **strong ref** to the
-    exact lock during injection; the test asserts `lock_held_during_call is True`, then that *same*
-    object is unlocked after **success and a raise**, and `engine._locks.get(sid)` **is** it (so the
-    release assertion can't be fooled by a freshly-GC-recreated lock).
-  - **At-most-once:** the raising injector records `queue.length` **at entry** (== 0 ⇒ LPOP-before-inject)
-    and the test asserts `queue.length == 0` **after** the exception (not re-queued).
-  - **Lock scope:** a pop-spy asserts the lock is **unlocked during the pop** (wraps only inject); a
-    `SessionLocks` get-spy asserts **zero** lock acquisitions on the no-ctx / no-injector / empty-queue
-    paths.
-  - Plus: **empty `{}`** still injects; the no-injector path is the **Slice 2 regression** (un-injected
-    return); two ctx payloads release **FIFO** with injection between; direct construction with a **sync**
-    `inject_context` duck raises `AssertionError`. No `asyncio.sleep`, no Redis lock.
+### T11 — edge receiver (the webhook absorber)
+- **`sandbox/edge_pipecat/receiver.py`:** construct `AgentLatch(redis_url="redis://localhost:6379")`
+  and mount `create_router(latch)` (SPEC §3.1 / §4 — the Slice-1 optional router exposing
+  `POST /api/v1/queue_response`). Runnable: `uvicorn receiver:app`. The receiver **only enqueues**
+  (RPUSH) — it never polls, so it cannot violate the single-poll-loop contract (SPEC §3.4).
+- **Co-location decision:** the receiver lives **inside `edge_pipecat/`** (not a third sandbox dir),
+  matching SPEC §5's two-app layout. Edge = Zone-1; it both **absorbs** webhooks (receiver.py) and
+  **delivers** (edge.py, T13). They run as **two processes** sharing one Redis (separate processes
+  keep uvicorn and the Pipecat runtime from fighting over one event loop, and only the delivery process
+  polls — so the concurrency contract holds). Production might co-locate them in one process; the
+  sandbox splits them for simplicity. Both use the same `redis_url`.
+- **`requirements.txt`:** install the **local core package with the fastapi extra**, editable, plus
+  `uvicorn` — e.g. `-e ../..[fastapi]` (or `pip install -e '../..[fastapi]'`). This pulls `fastapi`
+  via the *extra*, never into core. No core dep added.
 
-### T9 — `core.py` · facade wiring + the cooperation lock
-- **Constructor:** add keyword-only `context_injector: ContextInjector | None = None`. Validate it is
-  `None` **or** an instance of `ContextInjector`, else **`ValueError`** (§4.8). The `async`-ness of
-  `inject_context` is already guaranteed by the ABC's `__init_subclass__` (T7), so no
-  `iscoroutinefunction` check is needed here. Own a `SessionLocks`; pass
-  `injector=context_injector, locks=self._locks` to the `DeliveryEngine`. Keyword-only ⇒ non-breaking.
-  **Public constructor change → Ask-first / gate sign-off (§4.1, APPROVED).**
-- **Expose the cooperation lock** (§4.5): `def memory_lock(self, session_id: str) -> asyncio.Lock`
-  returning `self._locks.get(<normalized id>)` — normalized through the **same** `NonEmptyStr`
-  adapter `get_next_message`/`enqueue` use, so the developer's lock is the **same object** the
-  injection acquires. Its docstring states the contract: *guard your LLM memory reads with
-  `async with latch.memory_lock(session_id)`; AgentLatch calls `inject_context` under this lock.*
-  **Deadlock footgun (§4.9):** the lock is a plain non-reentrant `asyncio.Lock`, so the docstring also
-  warns — **never call `get_next_message` for a session while already holding its `memory_lock`**: a due
-  injection re-acquires the same lock and the task deadlocks. Acquire `memory_lock` around reads only;
-  release it before polling.
-- **Tests** (extend `test_inject.py` + `test_core.py`): round-trip — enqueue a payload with
-  `silent_context_update`, advance the clock ≥ 2.0s → the injector's `inject_context` is awaited
-  (spy) **then** the `ResponsePayload` is returned; default construction (no injector) returns the
-  payload **un-injected**; a non-`ContextInjector` (e.g. `object()`) **or** a `ContextInjector`
-  subclass whose `inject_context` is **sync**/non-callable → `ValueError` at construction;
-  `memory_lock(" s1 ")` returns the **same** lock object the injection for `"s1"` acquires; and the
-  **documented safe order** round-trips — acquire+release `memory_lock("s1")`, then `get_next_message`
-  injects fine (proving the contract, not the deadlock).
+### T12 — LangGraph backend (the webhook fire)
+- **`sandbox/backend_langgraph/graph.py`:** a `StateGraph` with **one node** that does
+  `await asyncio.sleep(10)` (simulated heavy Zone-3 compute) then `await httpx.AsyncClient().post(
+  WEBHOOK_URL, json=<ResponsePayload-shaped body>)`. `WEBHOOK_URL` from env (default
+  `http://localhost:8000/api/v1/queue_response`). The POST body matches `ResponsePayload`
+  (`session_id`, `text_to_speak`, optional `silent_context_update`) — **the contract is owned by core
+  `schemas.py`**; the backend must not invent fields (extra keys → 422).
+- **`requirements.txt`:** `langgraph` + `httpx`. **Never** `agentlatch` core internals — the backend
+  is a black-box HTTP client; it knows only the URL + the JSON shape.
+- **Verify** drives the graph against the **running T11 receiver** and asserts `202 {"status":
+  "queued"}` + the item landed in Redis. The 10s sleep is configurable (env) so the smoke check
+  doesn't wait the full duration.
 
-### CP-D — Slice 3 complete (human gate)
-Evidence: full suite + `ruff` + `mypy src` green; SPEC §7 gate 4 holds (`inject_context` awaited
-**under `memory_lock`**, **before** the payload is returned, **only** when `silent_context_update`
-is present **and** an injector is configured); the no-injector path is unchanged (un-injected return);
-injection ordering proven (memory updated before the text surfaces); `memory_lock` returns the same
-lock the injection uses. Optional: a live real-Redis round-trip with a real injector. Then await
-explicit approval.
+### T13 — Pipecat edge delivery (poll → TextFrame)
+- **`sandbox/edge_pipecat/frame_processor.py`:** a custom `FrameProcessor` whose `process_frame`
+  (1) **tracks** the live `is_user_speaking` *state* from Pipecat's VAD frames
+  (`UserStartedSpeakingFrame` → True, `UserStoppedSpeakingFrame` → False) and (2) **polls
+  `latch.get_next_message(session_id, is_user_speaking)` continuously on the frame cadence** — not only
+  on the VAD events — then on a returned payload **pushes a `TextFrame(text=payload.text_to_speak)`
+  downstream** (**never a raw string** — SPEC §9 Never). All other frames pass through untouched.
+- **TIMING TRAP (cross-check BLOCKER, §4.9):** the engine writes `last_speech` **only** when polled
+  with `is_user_speaking=True` (SPEC §3.4). If the processor polled **only** on VAD start/stop, a long
+  utterance would mark `last_speech` at speech-*start*, then the stop-poll would compute
+  `silence = now − start` ≥ 2.0s and **release immediately at speech-end with zero real silence**. So
+  the processor **must keep polling while the user speaks** (each `True` poll re-stamps `last_speech` to
+  ~now), making `last_speech` track the *most recent* speech moment; only then does a genuine ≥2.0s gap
+  after the *last* speech frame release the message. This is the "natural Pipecat poll loop" SPEC §2
+  decision 2 assumes — poll every frame, not every VAD event.
+- **`sandbox/edge_pipecat/edge.py`:** minimal pipeline wiring (transport → VAD → our FrameProcessor →
+  TTS) constructing the **same** `AgentLatch(redis_url=…)` the receiver uses, polling the shared
+  `SESSION_ID` (§4.10). Pipecat specifics are **source-driven** (build with
+  `agent-skills:source-driven-development` — do **not** guess the API); the plan fixes only the
+  *contract*, not the Pipecat call signatures.
+- **SILENCE CADENCE (cross-check R2-MAJOR).** The continuous-poll design needs `process_frame` to keep
+  firing **during silence** — but if Pipecat emits no frames while the user is quiet, polling starves
+  and the message never releases. **Source-verify** Pipecat's silence behavior; if it does **not** tick
+  during silence, drive polling with the edge's **own periodic poll** (a small-interval task). This is
+  the consumer's *poll cadence*, **not** silence measurement — silence is still computed in core by
+  timestamp diffing (SPEC §3.4/§9); the cadence sleep never evaluates the window. Settle the exact
+  mechanism at build time against Pipecat docs; an **automated** edge test must show polls continue after
+  `UserStoppedSpeakingFrame`.
+- **ONE serialized poll path (cross-check R3-BLOCKER, §3.4).** The frame-driven poll **and** any periodic
+  timer poll target the *same* `SESSION_ID` — running both concurrently is **two pollers on one session**,
+  exactly what §3.4 forbids (one could `LPOP` a message the other gated, or write `last_speech` between a
+  poll's silence check and its `LPOP`). So they must funnel through **one serialized poll path**: a single
+  poll coroutine with an **in-flight guard** (no overlapping `get_next_message` for a session), or the
+  timer fires **only when** the frame cadence is absent. Never two live poll loops per session.
+- **`requirements.txt` += `pipecat-ai`** (its own venv). **Unit-testable core:** the FrameProcessor's
+  poll→TextFrame logic is provable **without** WebRTC — a `sandbox/edge_pipecat/test_frame_processor.py`
+  (its own venv) drives the processor with an `AgentLatch` on a real/`fakeredis` Redis + **injected
+  clock**, asserting the full timing curve deterministically (no `sleep`): start-speaking → several
+  continued-speech polls (each re-stamps `last_speech`) → stop-speaking → at **1.999s** of silence
+  **no `TextFrame`** is pushed → crossing **≥2.0s** pushes **exactly one** `TextFrame` whose text ==
+  `payload.text_to_speak`. This both proves "only after >2.0s silence" *and* guards the stale-timestamp
+  trap above (a start-only-poll implementation fails the 1.999s case by releasing early). A raw `str`
+  is **never** pushed. This sandbox test is **not** collected by core `uv run pytest`
+  (`testpaths=["tests"]`).
+- **Single poll loop:** exactly one FrameProcessor polls a given session (one WebRTC stream ⇒ one loop),
+  honoring SPEC §3.4. The receiver process never polls.
+
+### CP-E — the Interruption Test (human gate, live)
+The SPEC §8 final gate, run by a human on a real WebRTC client: (1) start the Pipecat session and speak
+one long continuous sentence; (2) trigger the LangGraph backend mid-sentence so the webhook fires;
+(3) **PASS** = AgentLatch holds the message in Redis and the TTS is injected **only** after the human
+pauses > 2.0s. Needs T10–T13 **merged** + `docker compose up`.
+- **Evidence — timestamped, sandbox-side log of the held-then-released path** (so the timing is
+  *provable* and diagnosable, **without** touching frozen core, §4.11): structured lines for the
+  webhook **enqueue** (and the **sid** posted), the edge's **polled sid**, **Redis queue length + TTL
+  before and after** each poll (read directly from Redis), the FrameProcessor's **own computed
+  silence**, whether the poll **returned a payload vs None**, and the **`TextFrame` push** — showing
+  the message sat in Redis through the whole utterance and surfaced only after the > 2.0s gap. Posted
+  sid == polled sid (§4.10). (A screen recording may accompany it but is not sufficient alone.)
+- **Boundary-integrity check** (precise): `[project.dependencies]` in core `pyproject.toml` is **only**
+  `redis` + `pydantic`; `fastapi` appears **only** as the optional extra; `pipecat-ai`/`langgraph`/
+  `langchain` appear **nowhere** outside `/sandbox` — scanned across `pyproject.toml`, **`uv.lock`**,
+  `.github/`, and `src/` (not pyproject alone). Each sandbox app carries its own `requirements.txt`.
+- **Doc-freshness** + a sandbox-README/runbook sanity (a fresh reader can run the test from the docs
+  alone) run here too, per dev-loop. Then explicit approval.
 
 ---
 
 ## 4. Decisions
 
-1. **`context_injector` keyword-only on `__init__`** (`ContextInjector | None`, default `None`).
-   Pre-planned in SPEC §3.3/§4; non-breaking. Ask-first public signature → **human sign-off at the
-   gate** (mirrors the `now` seam in Slice 2).
-2. **Injection lives in the ENGINE, not the facade.** SPEC §3.4 explicitly describes inject-before-
-   return as the Delivery Engine's behavior. The new engine→`memory` dependency is internal/downward,
-   not public API. (Considered facade-orchestration; rejected — §3.4 is the source of truth.)
-3. **Per-session `asyncio.Lock`, in-process, guarding only the `inject_context` await.** It protects
-   **in-process LLM memory**, and the single-loop-per-session contract (SPEC §3.4, normative since
-   Slice 2) means one process owns a session's loop. A Redis/distributed lock would be the wrong
-   layer **and** broker-scope creep (§1/§6).
-4. **At-most-once on injection failure.** Per §3.4 ordering (LPOP → inject → return), the message is
-   already popped when injection runs; a raising `inject_context` propagates and the message is not
-   returned or re-queued. Documented in the **public `get_next_message` docstring** so users know a
-   failing injector drops the dequeued message (M7).
-5. **Expose `memory_lock(session_id)` THIS slice (revised — was "defer").** The cross-check showed a
-   deferred accessor makes the lock **decorative**: without it, consumers cannot put their LLM memory
-   **reads** under AgentLatch's lock, so §3.3's read/write safety contract is unsatisfiable and §9
-   "never mutate memory without the guard" cannot hold end-to-end. So the `SessionLocks` registry
-   lives in `memory.py` (shared), the facade **owns and exposes** it, and the cooperation contract is
-   documented. Public-surface addition → routed to the gate (§5).
-6. **One event loop per `AgentLatch` instance (normative).** `asyncio.Lock` is loop-affine and the
-   registry's lazy creation assumes single-event-loop access. This extends the single-loop-per-session
-   contract; documented on `memory_lock` and the class. (No cross-thread locking — that would be
-   over-engineering for an async-first library.)
-7. **Lock-registry self-cleans via `weakref.WeakValueDictionary` (no leak).** The registry holds locks
-   by **weak** reference, so a session's `asyncio.Lock` lives exactly as long as a strong reference
-   exists — an in-flight injection's `async with`, or a developer's `memory_lock` block — and is
-   garbage-collected once unreferenced. This preserves lock **identity** at every instant mutual
-   exclusion matters (both parties are in an `async with`, so both hold strong refs to the *same* live
-   object) while bounding memory to *referenced* locks, not *all sessions ever seen*. A bounded-LRU
-   that evicts unlocked locks was **rejected**: once `memory_lock` exposes raw lock identity, a
-   developer can cache a reference to an evicted lock and later acquire a *different* object than the
-   injection uses, silently breaking mutual exclusion — weak-value storage avoids this because a
-   referenced lock is never collected.
-8. **`inject_context` is enforced `async` at the ABC (revised in T7).** The `ContextInjector`
-   `__init_subclass__` rejects a non-coroutine override at **class-definition** time, so any
-   `ContextInjector` *instance* is guaranteed to have an `async inject_context` — the strongest,
-   unbypassable layer (B1/M9, folded from the T7 diff cross-check). Therefore **T9's facade check
-   simplifies to `isinstance(context_injector, ContextInjector)` (or `None`)**, raising `ValueError`
-   for anything else (e.g. `object()`); the `iscoroutinefunction` check is no longer needed at the
-   facade. The `DeliveryEngine` keeps a lightweight precondition `assert` for direct-construction
-   misuse (§3 T8).
-9. **`memory_lock` is a non-reentrant `asyncio.Lock` (deadlock contract).** SPEC §3.3 specifies a plain
-   `asyncio.Lock`, which is not reentrant, so holding `memory_lock(sid)` across a `get_next_message(sid)`
-   that injects would deadlock (the injection re-acquires the same lock). The contract — read under the
-   lock, release, then poll — is documented on `memory_lock` and proven by a safe-order test (§3 T9). A
-   reentrant lock would deviate from §3.3 and is out of scope.
+1. **Sandbox is consumer-only; zero core changes** except the one **ruff exclude** in `pyproject.toml`
+   (tooling scope, no dep). Any core defect the sandbox surfaces is fixed in core via `dev-loop`, not
+   worked around — SPEC §1 scope discipline.
+2. **The three heavy libs never enter core.** `pipecat-ai`/`langgraph`/`langchain` live in per-app
+   `requirements.txt` under `/sandbox`; each task's Verify runs the full freeze gate — name-scan +
+   `git diff --exit-code` on `src/agentlatch`/`uv.lock`/`pyproject.toml` — to prove it (SPEC §9 Never).
+3. **Receiver co-located in `edge_pipecat/`, run as a separate process** from the delivery edge (SPEC §5
+   two-app layout; avoids a uvicorn-vs-Pipecat single-loop clash; only delivery polls, so §3.4 holds).
+4. **compose runs Redis only** (SPEC §8); apps run on the host in their own venvs.
+5. **The webhook body is `ResponsePayload`, owned by core `schemas.py`.** The backend is a black-box
+   HTTP client; it must not invent fields (`extra="forbid"` ⇒ 422). No new contract is introduced.
+6. **Pipecat/LangGraph specifics are source-driven, not planned.** The plan fixes the *contracts*
+   (poll → TextFrame; sleep → POST `ResponsePayload`); the unfamiliar API calls are settled at build
+   time against official docs (`agent-skills:source-driven-development`) to avoid inventing signatures.
+7. **FrameProcessor logic is unit-tested in isolation** so the human gate (CP-E) covers only the
+   genuinely manual WebRTC/audio path — de-risking the one unfamiliar-API task.
+8. **Core-freeze is *verified*, not just intended (cross-check B1).** Every sandbox task's Verify runs
+   `git diff --exit-code -- src/agentlatch` (no core source touched) and restricts the only allowed
+   `pyproject.toml` change to T10's single `ruff` exclude line. The boundary scan covers
+   `pyproject.toml` + **`uv.lock`** + `.github/` + `src/` for the three forbidden libs — a sandbox
+   `uv add` would surface in `uv.lock` even if `pyproject` looked clean.
+9. **Continuous-poll timing contract (cross-check B2).** The FrameProcessor polls `get_next_message`
+   on the frame cadence and re-stamps `last_speech` throughout speech; polling only on VAD start/stop
+   would release a held message the instant the user stops (elapsed speech counted as silence). Proven
+   by the injected-clock 1.999s-no-push / ≥2.0s-one-push test (§3 T13).
+10. **Shared `SESSION_ID` contract (cross-check R2-B1).** The edge polls `agentlatch:queue:<sid>` and
+    the backend POSTs `session_id` — they **must be the same string** or the message is enqueued under
+    one key and polled under another (silent non-delivery). A single `SESSION_ID` env (default e.g.
+    `sandbox-demo`) is read by **both** the backend (in the POST body) and the edge (passed to
+    `get_next_message`); the runbook sets it once. Both sides **log the sid they used** so a mismatch is
+    obvious. (T11/T12/T13 + CP-E.)
+11. **Observability is sandbox-side only — core stays frozen (cross-check R2-B2).** CP-E's timing proof
+    must **not** require core to emit "computed silence"/"LPOP" events (core exposes only
+    `get_next_message()` and is frozen this slice). The FrameProcessor derives and logs its **own**
+    silence (it owns the clock + speaking state) and reads **Redis qlen/TTL before+after** the poll
+    directly; "the poll returned a payload vs None" stands in for the LPOP. No core instrumentation.
+12. **`uv.lock` is frozen across the slice (cross-check R2-MAJOR).** No core dependency changes, so the
+    lock must be byte-identical — each task Verifies `git diff --exit-code -- uv.lock`. This catches a
+    **transitive** leak (a sandbox `uv add` pulling pipecat/langgraph deps into the core lock) that a
+    name-only grep would miss. (The T10 `[tool.ruff]` edit is under tooling, not deps, so it doesn't
+    touch the lock.) Each task also `git diff --exit-code -- pyproject.toml` (unchanged after T10's one
+    line) so a hard-dep can't drift in behind a stale lock; boundary/freeze checks run from the **repo
+    root** (not a sandbox cwd).
+13. **One serialized poll path per session (cross-check R3-BLOCKER, §3.4).** The frame-driven poll and
+    any periodic-poll fallback (§3 T13) must funnel through a **single** poll coroutine with an in-flight
+    guard, or the timer fires only when frames are absent — never two concurrent pollers on one
+    `SESSION_ID`. Proven by an automated T13 test (post-stop polling continues, no overlap).
 
 ## 5. Open questions (for the human gate) — RESOLVED
-Both public-surface items were **signed off at the plan gate 2026-06-08**, before T7 starts:
-- **`context_injector` constructor addition** — **APPROVED** (Ask-first, pre-planned in SPEC §3.3/§4).
-- **Expose `memory_lock(session_id)`** — **APPROVED** (the cross-check established a deferred accessor
-  leaves the lock decorative and the memory-safety contract unsatisfiable, §4.5; non-reentrancy
-  deadlock contract documented, §4.9).
-- _(Lock-registry growth is no longer an open question — solved in v1 by the `WeakValueDictionary`
-  registry, §4.7.)_
+Both signed off at the plan gate **2026-06-08**, before T10 starts:
+- **`pyproject.toml` ruff `extend-exclude = ["sandbox"]`** — **APPROVED**. The one core-file edit this
+  slice (tooling scope, no dependency); made in T10. (Alternative `sandbox/.ruff.toml` declined — one
+  exclude line is clearer.)
+- **Sandbox lib versions** — **APPROVED unpinned**. `pipecat-ai` / `langgraph` stay unpinned (latest) in
+  the throwaway sandbox `requirements.txt`; pin only if a breaking release bites.
 
 ## 6. Next step
-`dev-loop` always picks up the topmost unchecked, dependency-ready task in
-[`todo.md`](./todo.md) — the live status tracker. (This file owns the architecture, not the cursor.)
+`dev-loop` picks up the topmost unchecked, dependency-ready task in [`todo.md`](./todo.md) — **T10**.
 
 ## 7. Cross-check record
-Reviewed with **gpt-5.5** (effort=high) via `cross-check mode=plan`.
+Reviewed with **gpt-5.5** (effort=high) via `cross-check mode=plan`. **Verdict: CONVERGED** (rounds
+used: 3 — the cap). Every BLOCKER/MAJOR was **accepted and folded**; zero rejections.
 
-**Round 1 — 2 BLOCKER + 5 MAJOR + 2 MINOR (all accepted/folded):**
-- **BLOCKER — `@abstractmethod` doesn't enforce `async`/callable** → coroutine-fn validation at
-  construction (§4.8).
-- **BLOCKER — deferring `memory_lock` makes the lock decorative** → expose it now; registry moved to
-  `memory.py`; read-cooperation contract documented (§4.5).
-- MAJOR — truthy guard skips empty `{}` → `is not None` everywhere (§3 T8).
-- MAJOR — lock-registry growth → documented limitation (§4.7); _build-GC rejected, then re-framed R2._
-- MAJOR — lazy-lock single-loop assumption → "one event loop per instance" normative (§4.6).
-- MAJOR — `.locked()` only proves an instant → assert lock released after success **and** exception (§3 T8).
-- MAJOR — at-most-once undocumented for users → public `get_next_message` docstring note (§4.4).
-- MINOR — §1 "+ lock" vs T7 → reconciled (registry now in `memory.py`). MINOR — pick one exception → `ValueError`.
+**Round 1 — 2 BLOCKER + 6 MAJOR + 2 MINOR (all folded):**
+- BLOCKER — core-freeze never verified → per-task `git diff --exit-code -- src/agentlatch` + pyproject
+  restricted to T10's ruff line (§4.8).
+- BLOCKER — T13 stale-timestamp early release (poll only on VAD start/stop ⇒ release at speech-end) →
+  continuous-poll, re-stamp `last_speech` throughout speech; 1.999s/≥2.0s injected-clock test (§4.9).
+- MAJOR ×6 — T13 just-before-threshold test; CP-E observability vague; T11 TTL+payload-shape; T12
+  fail-on-non-202; boundary scan widened to uv.lock/.github/src; racey uvicorn smoke → readiness+trap.
+- MINOR ×2 — CP-E "redis+pydantic only" wording vs the fastapi extra; ephemeral ruff placeholder.
 
-**Round 2 — 0 BLOCKER + 3 MAJOR + 1 MINOR (all accepted/folded):**
-- MAJOR — engine bypasses injector validation on direct construction → precondition `assert` in
-  `DeliveryEngine.__init__` (§3 T8, §4.8).
-- MAJOR — `memory_lock` non-reentrant ⇒ deadlock if held across `get_next_message` → documented
-  acquisition-order contract + safe-order test (§4.9, §3 T9).
-- MAJOR — §4.7 understated the leak → corrected to *total distinct sessions over instance lifetime*;
-  bounded-LRU recorded as the future fix; build-vs-defer routed to the gate (§4.7, §5).
-- MINOR — sign-off timing → stated as required **before** implementing T9 (§5).
+**Round 2 — 2 BLOCKER + 4 MAJOR + 1 MINOR (all folded):**
+- BLOCKER — edge/​backend `session_id` never shared ⇒ enqueue-vs-poll key mismatch → shared `SESSION_ID`
+  contract, both sides logged (§4.10).
+- BLOCKER — CP-E "engine computed silence/LPOP" logs would force core instrumentation (frozen) →
+  observability moved fully sandbox-side (§4.11).
+- MAJOR — T11 invalid-body `LLEN==0` false; LRANGE≠raw bytes (model serializes defaults) → parse as
+  `ResponsePayload`; uv.lock transitive leak → `git diff --exit-code -- uv.lock` (§4.12); Pipecat may
+  not tick during silence → source-verify + periodic-poll fallback. MINOR — trap-cleanup the ruff file.
 
-**Round 3 (verification) — 0 BLOCKER + 2 MAJOR. Verdict: CONVERGED at the rounds cap.**
-- MAJOR — recorded bounded-LRU future fix is unsound once locks are public (cached ref to an evicted
-  lock ≠ injection's new lock) → **accepted**: replaced with a **`weakref.WeakValueDictionary`** registry
-  that self-cleans while preserving identity (§4.7) — this also *supersedes* the round-2 leak limitation.
-- MAJOR — engine precondition `assert` is stripped under `python -O` → **rejected, with reason**: the
-  facade (the only public surface) validates with a real `raise ValueError`, not an assert; the engine
-  assert is an internal dev-time precondition matching the merged Slice-2 `is_user_speaking` bool-assert,
-  and the unguarded case is direct-engine-construction + `-O` + a bad injector (knowing internal misuse).
+**Round 3 (cap) — 1 BLOCKER + 4 MAJOR + 2 MINOR (all folded; no further critic pass):**
+- BLOCKER — the periodic-poll fallback could run **alongside** frame-poll ⇒ two concurrent same-session
+  pollers (§3.4 violation) → **one serialized poll path** + in-flight guard (§4.13).
+- MAJOR — T11 boundary cmds used repo-root paths from a sandbox cwd → run freeze checks from repo root;
+  pyproject not frozen in T11–T13 → add `git diff --exit-code -- pyproject.toml`; fixed-key `LLEN==1`
+  flaky on rerun → unique sid / DEL / increment-by-one; T13 post-stop polling proof made an **automated**
+  test (not "or runbook"). MINOR — concrete `ResponsePayload`-parse helper; §1/§4 wording synced to the
+  stricter freeze gate.
 
-**Verdict: CONVERGED** (rounds used: 3). One logged rejection (engine `-O` assert); the WeakValueDictionary
-fix landed in the final round, so it carries no further critic pass — flagged for the implementer's tests.
+**Note:** the round-3 folds (one-poll-path, pyproject freeze, automated post-stop test, Redis isolation)
+landed in the final round, so — like the T7 WeakValueDictionary fix — they carry **no further critic
+pass**; flagged here for the implementer to honor in T13's tests and each task's Verify.
