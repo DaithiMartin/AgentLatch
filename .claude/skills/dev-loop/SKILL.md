@@ -95,7 +95,9 @@ read: **don't leak your intended solution or conclusions — but DO give it the 
 > (correctness, readability, architecture, security, performance), and confirm the SPEC §9 Boundaries hold
 > (especially the seams: no `asyncio.sleep` to measure silence — timestamp diffing only; real
 > `redis.asyncio`, never a Python `dict`; the clock stayed an injectable callable; `fastapi` stayed an
-> optional extra, never a hard core dep). Return a verdict: **pass**, or **fail** with specific findings."
+> optional extra, never a hard core dep). Also confirm **every Acceptance bullet is actually exercised by
+> a Verify step** — flag any *inspection-only* guarantee (one no Verify command would catch if it broke).
+> Return a verdict: **pass**, or **fail** with specific findings."
 
 **Mutation-test subtle tasks (non-negotiable).** With no task-level `mode=plan`, mutation testing is now
 the **primary** test-rigor check, not a supplement — so on any task with an ordering / atomicity /
@@ -103,6 +105,13 @@ concurrency / identity / timing guarantee, **require the reviewer to mutation-te
 implementation to plausible-wrong variants (fire-and-forget instead of await; `truthy` instead of
 `is not None`; lock the wrong region) and confirm a test **fails** for each. This is the check that
 replaced the dropped plan review — do **not** let loop-speed pressure skip it.
+
+**Acceptance↔Verify coverage (inspection-only guarantees).** `slice-plan` should already ensure every
+Acceptance bullet maps to a Verify step that exercises it, but the verify step is the backstop: if a
+reviewer flags an Acceptance guarantee that's true only *by inspection* (no command would go red if it
+broke), **fold a gate before shipping** — a `grep` gate, an error-path assertion, a mutation a test
+catches — and add it to the task's Verify block. (Slice-4 T11 "receiver never polls" and T12 "non-202
+raises" both shipped this gap and were closed this way.)
 
 **For infra / packaging tasks** (e.g. the Dockerfile) the Verify block may not be fully runnable cold or
 pre-merge. Tell the agent what's checkable **now** (a local `docker build`, inspecting produced artifacts)
