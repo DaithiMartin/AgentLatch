@@ -79,7 +79,7 @@ Redis — only the delivery process polls, so the single-poll-loop contract (SPE
 ```bash
 cd edge_pipecat
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt      # installs core via the [fastapi] extra, editable
+pip install -r requirements.txt      # (T11) installs core via the [fastapi] extra, editable
 uvicorn receiver:app                  # the webhook absorber → POST /api/v1/queue_response  (T11)
 # in a second shell, same SESSION_ID:  python edge.py        # the polling delivery edge   (T13)
 ```
@@ -94,7 +94,7 @@ AgentLatch internals.
 cd backend_langgraph
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt      # langgraph + httpx
-SESSION_ID=$SESSION_ID python -c "..."   # invoke the compiled graph (see T12)
+SESSION_ID=$SESSION_ID python graph.py   # invoke the compiled graph → fires the webhook  (T12)
 ```
 
 ---
@@ -109,7 +109,8 @@ for the authoritative definition. Operationally:
    every shell.
 2. Start the edge: `uvicorn receiver:app` (shell 1) and `python edge.py` (shell 2).
 3. Join the WebRTC session and **speak one long continuous sentence**.
-4. **Mid-sentence**, trigger the LangGraph backend so the webhook fires.
+4. **Mid-sentence**, trigger the LangGraph backend (`python graph.py`, shell 3,
+   same `SESSION_ID`) so the webhook fires.
 5. **PASS** = AgentLatch **holds** the message in Redis and the TTS is injected
    **only after** the human pauses **> 2.0s** — never cutting into live speech.
 
