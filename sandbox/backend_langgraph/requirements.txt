@@ -1,0 +1,5 @@
+# Deep Backend (Zone 3) — its OWN venv. A black-box HTTP client: it knows only
+# the webhook URL and the ResponsePayload JSON shape, never agentlatch internals.
+# Unpinned per the slice plan (pin only if a breaking release bites).
+langgraph
+httpx
