@@ -138,8 +138,8 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
 
 ---
 
-## Open decisions (for the human gate — see [`plan.md`](./plan.md) §5)
-- [ ] **`pyproject.toml` `[tool.ruff] extend-exclude = ["sandbox"]`** — touches core (tooling only, no
-      dependency). Routed to the gate for an explicit nod. (Alt: a separate `sandbox/.ruff.toml`.)
-- [ ] **Leave `pipecat-ai` / `langgraph` unpinned** in the throwaway sandbox `requirements.txt` (pin
-      only if a breaking release bites) — confirm or request pins.
+## Open decisions (signed off at the plan gate 2026-06-08 — see [`plan.md`](./plan.md) §5)
+- [x] **`pyproject.toml` `[tool.ruff] extend-exclude = ["sandbox"]`** — **APPROVED** (tooling only, no
+      dependency); the one core edit this slice, made in T10.
+- [x] **Leave `pipecat-ai` / `langgraph` unpinned** in the throwaway sandbox `requirements.txt` —
+      **APPROVED** (pin only if a breaking release bites).

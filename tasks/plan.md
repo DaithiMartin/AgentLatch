@@ -250,14 +250,13 @@ pauses > 2.0s. Needs T10–T13 **merged** + `docker compose up`.
     guard, or the timer fires only when frames are absent — never two concurrent pollers on one
     `SESSION_ID`. Proven by an automated T13 test (post-stop polling continues, no overlap).
 
-## 5. Open questions (for the human gate)
-- **`pyproject.toml` ruff `extend-exclude = ["sandbox"]`** — a core-file edit (tooling only, no dep).
-  Strictly it touches core, so routed to the gate for an explicit nod, even though it adds nothing
-  runtime. *(Alternative considered: a separate `sandbox/.ruff.toml` and never touch core — rejected as
-  more confusing than one exclude line; open to the reverse if preferred.)*
-- **Pin versions for the sandbox libs?** Proposed: leave `pipecat-ai` / `langgraph` unpinned (latest)
-  in the sandbox `requirements.txt` for now, since they're throwaway dev envs; pin only if a breaking
-  release bites. Confirm or request pins.
+## 5. Open questions (for the human gate) — RESOLVED
+Both signed off at the plan gate **2026-06-08**, before T10 starts:
+- **`pyproject.toml` ruff `extend-exclude = ["sandbox"]`** — **APPROVED**. The one core-file edit this
+  slice (tooling scope, no dependency); made in T10. (Alternative `sandbox/.ruff.toml` declined — one
+  exclude line is clearer.)
+- **Sandbox lib versions** — **APPROVED unpinned**. `pipecat-ai` / `langgraph` stay unpinned (latest) in
+  the throwaway sandbox `requirements.txt`; pin only if a breaking release bites.
 
 ## 6. Next step
 `dev-loop` picks up the topmost unchecked, dependency-ready task in [`todo.md`](./todo.md) — **T10**.
