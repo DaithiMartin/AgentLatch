@@ -157,17 +157,28 @@ with no such line). If neither the line nor the file appears, the run failed (au
 2. **Arbitrate every BLOCKER and MAJOR** — Claude has final say; the critic advises, it does not
    command. For each: **accept** → revise the plan/code and note what changed; or **reject** → log a
    one-line reason. MINORs are recorded, not gating.
-   - **CONVERGED** — this round returned a **clean round** (`OPEN_BLOCKERS: 0  OPEN_MAJORS: 0`): an
-     **independent, memory-less** second-model read of the *current* target found nothing material.
-     Go to Step 4. (The meaning shifted from the old resume loop — see Step 4.)
+   - **Out-of-target findings are a non-gating target-lock breach.** A finding about a file **not in
+     the review target** is out of scope — even with the fence, the critic can pull coupled adjacent
+     code (e.g. the diff's POST target) into context via a broad grep and flag it (observed on T12: two
+     fresh rounds flagged the already-merged T11 `receiver.py`). **Reject it for this review, record it
+     as a separate observation** (surface it for a follow-up task — **never** fold an out-of-target
+     change into this diff), and do **NOT** count it toward the in-target BLOCKER/MAJOR tally or the
+     verdict. The verdict is decided on **in-target** findings only. (The finding may be valid on its
+     merits — "non-gating" means "not for *this* review", not "wrong".)
+   - **CONVERGED** — this round returned a clean round **in-target** (`OPEN_BLOCKERS: 0  OPEN_MAJORS: 0`
+     once any out-of-target findings are set aside): an **independent, memory-less** second-model read
+     of the *current* target found nothing material. Go to Step 4. (The meaning shifted from the old
+     resume loop — see Step 4.)
    - Else (BLOCKER/MAJOR found this round) **and `ROUND < rounds`** → fold the accepted findings (the
      rejected ones stay open), revise the target, **(diff mode) regenerate `/tmp/cross-check-diff.patch`
      so the next round reads the corrected code**, `ROUND += 1`, and run another **fresh** round (Step
      3). Folded findings are **unverified** until a later fresh round reads the corrected target and
      stays silent on them.
-3. **At the cap** — a round found BLOCKER/MAJOR **and `ROUND == rounds`** (no clean round was reached
-   within budget). Do NOT fake convergence; pick the honest terminal verdict:
-   - If **any BLOCKER/MAJOR is open (rejected)** → **DEADLOCK** — a genuine Claude-vs-critic
+3. **At the cap** — a round found an **in-target** BLOCKER/MAJOR **and `ROUND == rounds`** (no
+   in-target clean round was reached within budget). Do NOT fake convergence; pick the honest terminal
+   verdict. (A round whose only findings are **out-of-target** is an in-target clean round → CONVERGED,
+   not a cap case — those never gate.)
+   - If **any in-target BLOCKER/MAJOR is open (rejected)** → **DEADLOCK** — a genuine Claude-vs-critic
      disagreement the human must break.
    - Else (the final round's findings were **all accepted and folded**, but **no further fresh round
      confirmed them**) → **ROUNDS_EXHAUSTED** — the round budget ran out with the last fixes
@@ -185,9 +196,10 @@ Return a compact report to the caller (`slice-plan`, `dev-loop`, or the user):
 ## cross-check — mode=<mode> · reviewed with: <model> (effort=<effort>) · rounds used: <n>/<rounds>
 Verdict: CONVERGED | ROUNDS_EXHAUSTED | DEADLOCK
 
-Findings:
+Findings (in-target):
 - [SEV] area: finding — Fix: … → accepted (changed X) | rejected (reason) | recorded (minor)
 
+Out-of-target observations (non-gating): <findings about files outside the review target — recorded for a follow-up task; did NOT count toward the verdict>
 Unverified final-round folds (ROUNDS_EXHAUSTED only): <findings accepted+folded in the last round that the critic never re-reviewed — carry no critic pass>
 Open disagreements (DEADLOCK only): <critic's point vs. Claude's counter-position>
 ```
@@ -201,7 +213,8 @@ The three verdicts are **not** interchangeable:
 - **ROUNDS_EXHAUSTED** — the `rounds` budget ran out while still folding accepted findings; the final
   fixes are sound to Claude but **never read clean by a fresh round**. Raising `rounds` and re-running
   may earn a confirming (CONVERGED) round.
-- **DEADLOCK** — the cap was hit with an open BLOCKER/MAJOR Claude **rejected**: a real disagreement.
+- **DEADLOCK** — the cap was hit with an open **in-target** BLOCKER/MAJOR Claude **rejected**: a real
+  disagreement. (An out-of-target finding never causes DEADLOCK — it is a non-gating observation.)
 
 `reviewed with: <model>` is mandatory — a review's provenance is never ambiguous. The `--json` stream
 does NOT echo the served model, so surface the **pinned** value: a wrong or unauthorized slug fails the
@@ -234,8 +247,11 @@ a same-model fallback (cross-context, not cross-model).
 - Claude is the final arbiter on every finding — incorporate good critiques, reject bad ones *with a
   logged reason*. Don't cave on everything (defeats the cross-model check) and don't ignore it
   (defeats the point).
+- **Verdict is decided on in-target findings only.** A finding about a file outside the review target
+  is a non-gating target-lock breach: record it as a separate observation, surface it for a follow-up,
+  and **never** fold an out-of-target change into the diff under review. It can't make a round CONVERGED-blocking, ROUNDS_EXHAUSTED, or DEADLOCK.
 - **`CONVERGED` is reserved for a clean critic round — a fresh, memory-less critic must have read the
-  *current* target and returned `0/0`.** Never label a cap-hit run CONVERGED: if the last round's
+  *current* target and returned `0/0` in-target** (out-of-target observations set aside). Never label a cap-hit run CONVERGED: if the last round's
   findings were folded without a confirming fresh round it's **`ROUNDS_EXHAUSTED`** (fixes unverified);
   if a BLOCKER/MAJOR is open/rejected at the cap it's **`DEADLOCK`**. Surface both honestly — "ran out
   of tries" is not "a cold read signed off".
