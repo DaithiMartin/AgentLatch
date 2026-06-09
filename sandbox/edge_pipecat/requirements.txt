@@ -1,5 +1,13 @@
 # Fast Edge (Zone 1) — its OWN venv. Installs the local core package editable,
-# pulling FastAPI via the [fastapi] EXTRA (never into core deps). T13 adds
-# pipecat-ai here; T11 needs only the receiver's stack.
+# pulling FastAPI via the [fastapi] EXTRA (never into core deps). The heavy
+# pipecat-ai dep lives ONLY here, never in core (SPEC §5 / §9).
 -e ../..[fastapi]
 uvicorn
+pipecat-ai
+
+# --- test only: the sandbox-local FrameProcessor unit test (T13) ---
+# fakeredis + an injected clock make the silence-timing curve deterministic
+# (no sleep), matching the core test strategy (SPEC §7).
+pytest
+pytest-asyncio
+fakeredis
