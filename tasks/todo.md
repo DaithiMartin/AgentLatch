@@ -7,7 +7,7 @@ Status tracker for the `dev-loop`. Architecture, DAG, and design notes live in
 > library (ingest, delivery, context injection) is built and live-smoke-verified. Full history in git.
 > **This slice (4)** proves the whole path in a **live environment** (SPEC §8) — a dev Redis, a Pipecat
 > WebRTC edge, a LangGraph backend, and the human **Interruption Test** — **without changing core**.
-> Plan drafted 2026-06-08; **T10 merged ([#16](https://github.com/DaithiMartin/AgentLatch/pull/16)); T11 PR-open ([#18](https://github.com/DaithiMartin/AgentLatch/pull/18)); next: T12**.
+> Plan drafted 2026-06-08; **T10–T11 merged ([#16](https://github.com/DaithiMartin/AgentLatch/pull/16), [#18](https://github.com/DaithiMartin/AgentLatch/pull/18)); T12 PR-open ([#19](https://github.com/DaithiMartin/AgentLatch/pull/19)); next: T13**.
 
 **Status legend:** `[ ]` pending · `[~]` PR open (link) · `[x]` merged.
 A task flips to `[x]` only on **merge** (the next task's start flips it).
@@ -41,7 +41,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
         `redis` + `pydantic`, `fastapi` extra only).
 - **Verify:** `docker compose config && docker compose up -d && docker exec $(docker compose ps -q redis) redis-cli ping && docker compose down` ; ruff exclude proof with cleanup-on-failure: `( trap 'rm -f sandbox/_rufftest.py' EXIT; printf 'import os\n' > sandbox/_rufftest.py && uv run ruff check . )` ; `uv run pytest -q && uv run mypy src` ; **core frozen:** `git diff --exit-code -- src/agentlatch` **and** `git diff --exit-code -- uv.lock` (lock unchanged — the ruff edit isn't a dep) ; **boundary scan:** `grep -rniE 'pipecat|langgraph|langchain' pyproject.toml uv.lock .github src` returns **nothing**.
 
-### T11 — edge receiver: AgentLatch + FastAPI router  `[~]` — [PR #18](https://github.com/DaithiMartin/AgentLatch/pull/18)
+### T11 — edge receiver: AgentLatch + FastAPI router  `[x]` — [PR #18](https://github.com/DaithiMartin/AgentLatch/pull/18) (merged)
 - **Depends on:** T10.
 - **Do:** `sandbox/edge_pipecat/receiver.py` — construct `AgentLatch(redis_url="redis://localhost:6379")`
   and mount `create_router(latch)` (the Slice-1 router → `POST /api/v1/queue_response`), exposing
@@ -66,7 +66,7 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
         §3.4 "receiver doesn't poll" property a mechanical gate, not inspection-only.)
 - **Verify:** (Redis up) from `sandbox/edge_pipecat`: fresh venv + `pip install -r requirements.txt`; start `uvicorn receiver:app` with a **readiness wait** (poll `:8000` until up; **fail if 8000 already occupied**) and a `trap`-killed PID. Use a **unique sid per run** (or `redis-cli DEL agentlatch:queue:$SID` first) so stale state can't skew it: valid POST == **202**, `redis-cli TTL agentlatch:queue:$SID` in `(0,3600]`, and a **parse helper** asserts the stored value is a `ResponsePayload` — `python -c "import json,redis,agentlatch; r=redis.Redis(); raw=r.lindex(f'agentlatch:queue:{SID}',-1); p=agentlatch.ResponsePayload(**json.loads(raw)); assert p.text_to_speak==EXPECTED"`; record `LLEN`, then invalid POST == **422** with `LLEN` **unchanged**. **Boundary/freeze (from repo root, e.g. `git -C ../.. …`):** `grep -rniE 'pipecat|langgraph|langchain' ../../pyproject.toml ../../uv.lock ../../.github ../../src` empty; `git -C ../.. diff --exit-code -- src/agentlatch uv.lock pyproject.toml`. **Enqueue-only (§3.4):** `grep -q get_next_message receiver.py` returns nothing (the receiver must never poll).
 
-### T12 — LangGraph backend: webhook fire after compute  `[ ]`
+### T12 — LangGraph backend: webhook fire after compute  `[~]` — [PR #19](https://github.com/DaithiMartin/AgentLatch/pull/19)
 - **Depends on:** T11 (a receiver to POST to).
 - **Do:** `sandbox/backend_langgraph/graph.py` — a `StateGraph` with **one node**: `await
   asyncio.sleep(SLEEP_S)` (default 10; env-overridable for the smoke check) then `httpx` POST a
@@ -78,13 +78,13 @@ A `CP-*` checkpoint flips to `[x]` only on the user's **explicit approval**.
   shape. It **must treat a non-202 as failure** (`raise_for_status()` / assert `status_code == 202`),
   so a 422 from a contract drift surfaces loudly rather than being swallowed.
 - **Acceptance:**
-  - [ ] Invoking the compiled graph (with `SLEEP_S` small) sleeps, then POSTs a **valid**
+  - [x] Invoking the compiled graph (with `SLEEP_S` small) sleeps, then POSTs a **valid**
         `ResponsePayload` JSON to `WEBHOOK_URL`; against the running T11 receiver it gets **202** and
         the **exact `session_id` it emitted** is the key that gains a message in Redis. A non-202
-        response **raises** (no silent swallow).
-  - [ ] `requirements.txt` contains `langgraph` + `httpx` and **no** `agentlatch` internals; core
+        response **raises** (no silent swallow). *(Non-202 raise now gated in Verify — see below.)*
+  - [x] `requirements.txt` contains `langgraph` + `httpx` and **no** `agentlatch` internals; core
         `pyproject`/`uv.lock` carry no `langgraph`/`langchain` (lock byte-identical).
-- **Verify:** (Redis + T11 receiver running) `backend_langgraph` venv + install; with a clean key (`redis-cli DEL agentlatch:queue:$SID`) record `LLEN`, then `SLEEP_S=0 SESSION_ID=$SID WEBHOOK_URL=http://localhost:8000/api/v1/queue_response python -c '...ainvoke...'` exits 0 (202 asserted via raise_for_status) and `LLEN agentlatch:queue:$SID` **increments by exactly one** (same sid the edge will poll). **Boundary/freeze (repo root):** `grep -rniE 'pipecat|langgraph|langchain' pyproject.toml uv.lock .github src` empty; `git diff --exit-code -- src/agentlatch uv.lock pyproject.toml`.
+- **Verify:** (Redis + T11 receiver running) `backend_langgraph` venv + install; with a clean key (`redis-cli DEL agentlatch:queue:$SID`) record `LLEN`, then `SLEEP_S=0 SESSION_ID=$SID WEBHOOK_URL=http://localhost:8000/api/v1/queue_response python -c '...ainvoke...'` exits 0 (202 asserted via raise_for_status) and `LLEN agentlatch:queue:$SID` **increments by exactly one** (same sid the edge will poll). **Boundary/freeze (repo root):** `grep -rniE 'pipecat|langgraph|langchain' pyproject.toml uv.lock .github src` empty; `git diff --exit-code -- src/agentlatch uv.lock pyproject.toml`. **Non-202 raises (no swallow):** re-run with `WEBHOOK_URL=http://localhost:8000/api/v1/WRONG` (404) → `python graph.py` exits **non-zero** and `LLEN` unchanged (a contract drift / 422 must surface, never be swallowed).
 
 ### T13 — Pipecat edge delivery: poll → TextFrame  `[ ]`
 - **Depends on:** T11 (shares the edge `AgentLatch`); T10 (Redis).
